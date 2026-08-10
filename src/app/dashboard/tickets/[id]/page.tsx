@@ -1,0 +1,1 @@
+import{AppShell}from"@/components/app-shell";export default async function Ticket({params}:{params:Promise<{id:string}>}){const{id}=await params;return <AppShell><span className="eyebrow">Support ticket</span><h1>Ticket {id.slice(0,8)}</h1><div className="glass card"><p className="muted">Messages are protected by ticket ownership policies.</p></div></AppShell>}

@@ -1,0 +1,1 @@
+import{notFound}from"next/navigation";import{SiteHeader}from"@/components/site-header";import{SiteFooter}from"@/components/site-footer";export default async function Post({params}:{params:Promise<{slug:string}>}){await params;notFound();return <><SiteHeader/><SiteFooter/></>}

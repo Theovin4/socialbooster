@@ -1,0 +1,3 @@
+import type{Metadata}from"next";import"./globals.css";
+export const metadata:Metadata={metadataBase:new URL(process.env.NEXT_PUBLIC_APP_URL||"https://socialbooster.vercel.app"),title:{default:"Social Booster — Social marketing services, clearly priced",template:"%s | Social Booster"},description:"Browse and order permitted social media marketing services with transparent pricing, wallet controls, and reseller tools.",openGraph:{type:"website",siteName:"Social Booster"},twitter:{card:"summary_large_image"}};
+export default function RootLayout({children}:{children:React.ReactNode}){return <html lang="en"><body>{children}</body></html>}

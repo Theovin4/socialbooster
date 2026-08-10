@@ -1,0 +1,1 @@
+import type{MetadataRoute}from"next";export default function robots():MetadataRoute.Robots{return{rules:{userAgent:"*",allow:"/",disallow:["/dashboard/","/admin/","/api/internal/"]},sitemap:"https://socialbooster.vercel.app/sitemap.xml"}}

@@ -1,0 +1,1 @@
+import{AppShell}from"@/components/app-shell";export default function Admin(){return <AppShell admin><span className="eyebrow">Operations</span><h1 style={{fontSize:42}}>Admin overview</h1><div className="glass card"><p className="muted">Metrics load only for server-verified administrators. Empty or unavailable data is never replaced with fabricated numbers.</p></div></AppShell>}

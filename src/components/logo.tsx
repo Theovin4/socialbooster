@@ -1,0 +1,3 @@
+import Link from "next/link";
+export function Mark({size=34}:{size?:number}){return <svg width={size} height={size} viewBox="0 0 40 40" aria-hidden="true"><defs><linearGradient id="g"><stop stopColor="#39d5ff"/><stop offset="1" stopColor="#8b6cff"/></linearGradient></defs><path fill="url(#g)" d="M20 2 36 11v18L20 38 4 29V11zm-7 25h7.5c5 0 7.7-2 7.7-5.5 0-3.1-2-4.5-6.1-5.2l-3.8-.7c-1.5-.3-2-.7-2-1.4 0-.9.9-1.4 2.8-1.4 2.4 0 4.5.6 6.8 1.9l1.7-4c-2.5-1.5-5.3-2.2-8.4-2.2-5 0-8.1 2.2-8.1 5.9 0 3.2 2.1 4.8 6.1 5.5l3.7.6c1.5.3 2 .7 2 1.4 0 1-.9 1.4-2.8 1.4H13z"/></svg>}
+export function Logo(){return <Link href="/" style={{display:"flex",alignItems:"center",gap:10,fontWeight:900}}><Mark/><span>SOCIAL <span style={{color:"#66dfff"}}>BOOSTER</span></span></Link>}
