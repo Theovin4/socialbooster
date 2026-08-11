@@ -1,0 +1,25 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    function signedIn() { return request.auth != null; }
+    function owns(userId) { return signedIn() && request.auth.uid == userId; }
+    function admin() { return signedIn() && request.auth.token.admin == true; }
+
+    match /profiles/{userId} { allow read: if owns(userId) || admin(); allow create, update: if owns(userId) && request.resource.data.role == null; allow delete: if false; }
+    match /wallets/{userId} { allow read: if owns(userId) || admin(); allow write: if false; }
+    match /walletTransactions/{id} { allow read: if signedIn() && (resource.data.userId == request.auth.uid || admin()); allow write: if false; }
+    match /walletLedger/{id} { allow read: if signedIn() && (resource.data.walletUserId == request.auth.uid || admin()); allow write: if false; }
+    match /orders/{id} { allow read: if signedIn() && (resource.data.userId == request.auth.uid || admin()); allow write: if false; }
+    match /orderEvents/{id} { allow read: if signedIn() && (resource.data.userId == request.auth.uid || admin()); allow write: if false; }
+    match /refills/{id} { allow read: if signedIn() && (resource.data.userId == request.auth.uid || admin()); allow write: if false; }
+    match /transactions/{id} { allow read: if signedIn() && (resource.data.userId == request.auth.uid || admin()); allow write: if false; }
+    match /supportTickets/{id} { allow read: if signedIn() && (resource.data.userId == request.auth.uid || admin()); allow create: if signedIn() && request.resource.data.userId == request.auth.uid; allow update: if admin(); allow delete: if false; }
+    match /supportMessages/{id} { allow read: if signedIn() && (resource.data.userId == request.auth.uid || admin()); allow create: if signedIn() && request.resource.data.userId == request.auth.uid; allow update, delete: if false; }
+    match /notifications/{id} { allow read, update: if signedIn() && resource.data.userId == request.auth.uid; allow create, delete: if false; }
+    match /customerApiKeys/{id} { allow read: if signedIn() && resource.data.userId == request.auth.uid; allow write: if false; }
+    match /services/{id} { allow read: if true; allow write: if false; }
+    match /serviceCategories/{id} { allow read: if true; allow write: if false; }
+    match /blogPosts/{id} { allow read: if resource.data.status == "published" || admin(); allow write: if false; }
+    match /{document=**} { allow read, write: if false; }
+  }
+}

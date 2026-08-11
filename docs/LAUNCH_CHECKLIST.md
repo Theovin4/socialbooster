@@ -1,6 +1,6 @@
 # Production launch checklist
 
-- [ ] Supabase project, migration, RLS and database advisors verified
+- [ ] Firebase project, Authentication, Firestore rules and indexes verified
 - [ ] All Production environment variables configured; no secrets exposed
 - [ ] First admin elevated database-side and MFA enforced operationally
 - [ ] Provider sync, balance, status and one permitted low-value order tested

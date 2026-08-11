@@ -8,7 +8,8 @@ Open **Vercel → Social Booster project → Settings → Environment Variables 
 | `AUTH_SECRET` | Secret | Generate 32+ random bytes | `[random]` | yes | yes | yes | yes |
 | `CRON_SECRET` | Secret | Generate 32+ random bytes | `[random]` | yes | optional | yes | yes |
 | `DEFAULT_GROSS_MARGIN` | Server config | Business config | `0.40` | yes | yes | yes | yes |
-| Supabase variables | URL/key | Supabase → Project Settings → API Keys | `https://…supabase.co` / `sb_…` | yes | yes | yes | yes |
+| Firebase web variables | Public identifiers | Firebase → Project settings → General → Your apps | `AIza…`, project/app IDs | yes | yes | yes | yes |
+| Firebase Admin variables | Secret | Firebase → Project settings → Service accounts | project ID, client email, private key | yes | yes | local emulator/ADC | yes |
 | FollowsPanel variables | Secret API credential | FollowsPanel account → API | URL plus `[key]` | yes | optional | optional | yes |
 | Resend variables | Secret/sender | Resend → API Keys / Domains | `[key]`, `support@example.com` | yes | optional | optional | yes |
 | Turnstile variables | Public site key + secret | Cloudflare → Turnstile → widget | `0x…` | yes | yes | yes | yes |
