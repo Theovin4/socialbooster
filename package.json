@@ -9,7 +9,8 @@
     "start": "next start",
     "lint": "eslint",
     "typecheck": "tsc --noEmit",
-    "test": "vitest run --pool=threads --poolOptions.threads.singleThread"
+    "test": "vitest run --pool=threads --poolOptions.threads.singleThread",
+    "admin:set": "node scripts/set-admin.mjs"
   },
   "dependencies": {
     "firebase": "^12.16.0",
