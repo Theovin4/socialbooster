@@ -1,0 +1,10 @@
+import { AppShell } from "@/components/app-shell";
+import { adminDb } from "@/lib/firebase/admin";
+import { formatMoney } from "@/lib/money";
+import { adjustWallet } from "./actions";
+
+export const dynamic = "force-dynamic";
+export default async function AdminWalletsPage() {
+  const snapshot = await adminDb().collection("wallets").limit(100).get();
+  return <AppShell admin><span className="eyebrow">Financial controls</span><h1 style={{ fontSize: 42 }}>Wallets</h1><div className="glass card" style={{ marginBottom: 22 }}><h2>Audited adjustment</h2><p className="muted">Use only for a documented correction or approved test. Every submission creates immutable transaction and ledger entries.</p><form action={adjustWallet} style={{ display: "grid", gridTemplateColumns: "2fr 1fr 1fr 1fr", gap: 10 }}><input className="field" name="userId" placeholder="Firebase user UID" required /><input className="field" name="amount" inputMode="decimal" placeholder="Amount" required /><select className="field" name="direction"><option value="credit">Credit</option><option value="debit">Debit</option></select><select className="field" name="currency"><option>USD</option><option>GBP</option><option>EUR</option><option>NGN</option><option>CAD</option><option>AUD</option></select><input className="field" name="reason" placeholder="Required reason" minLength={5} required style={{ gridColumn: "1 / 4" }} /><button className="btn primary">Post adjustment</button></form></div>{snapshot.empty ? <div className="glass card"><h2>No wallets yet</h2><p className="muted">A wallet is created automatically when a signed-in customer opens their wallet page.</p></div> : <div style={{ display: "grid", gap: 12 }}>{snapshot.docs.map((doc) => { const item = doc.data(), available = Number(item.availableMinor ?? item.balanceMinor ?? 0); return <article className="glass card" key={doc.id}><strong>{doc.id}</strong><p className="muted">Available {formatMoney(BigInt(available), item.currency || "USD")} · Reserved {formatMoney(BigInt(item.reservedMinor || 0), item.currency || "USD")}</p></article>; })}</div>}</AppShell>;
+}
