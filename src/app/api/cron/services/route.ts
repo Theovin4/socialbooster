@@ -2,6 +2,7 @@ import { createHash, timingSafeEqual } from "node:crypto";
 import { FieldValue } from "firebase-admin/firestore";
 import { FollowsPanelClient } from "@/lib/providers/followspanel";
 import { adminDb } from "@/lib/firebase/admin";
+import { configuredMarginBps, decimalToMinor, sellingPriceMinor } from "@/lib/money";
 
 function valid(request: Request) {
   const expected = process.env.CRON_SECRET || "";
@@ -17,10 +18,12 @@ export async function GET(request: Request) {
     const db = adminDb();
     let changed = 0;
 
-    for (let offset = 0; offset < rows.length; offset += 450) {
-      const chunk = rows.slice(offset, offset + 450);
-      const refs = chunk.map((item) => db.collection("providerServices").doc(String(item.service)));
-      const existing = await db.getAll(...refs);
+    let repriced = 0;
+    for (let offset = 0; offset < rows.length; offset += 150) {
+      const chunk = rows.slice(offset, offset + 150);
+      const providerRefs = chunk.map((item) => db.collection("providerServices").doc(String(item.service)));
+      const approvedRefs = chunk.map((item) => db.collection("services").doc(String(item.service)));
+      const existing = await db.getAll(...providerRefs, ...approvedRefs);
       const batch = db.batch();
       let batchChanges = 0;
 
@@ -39,9 +42,22 @@ export async function GET(request: Request) {
           providerCurrency: "USD",
         };
         const syncFingerprint = createHash("sha256").update(JSON.stringify(service)).digest("hex");
-        if (existing[index].data()?.syncFingerprint === syncFingerprint) return;
-        batch.set(refs[index], { ...service, syncFingerprint, lastSyncedAt: FieldValue.serverTimestamp() }, { merge: true });
-        batchChanges += 1;
+        if (existing[index].data()?.syncFingerprint !== syncFingerprint) {
+          batch.set(providerRefs[index], { ...service, syncFingerprint, lastSyncedAt: FieldValue.serverTimestamp() }, { merge: true });
+          batchChanges += 1;
+        }
+
+        const approved = existing[chunk.length + index];
+        if (!approved.exists) return;
+        const approvedData = approved.data()!;
+        const providerRateMinor = decimalToMinor(item.rate);
+        if (Number(providerRateMinor) === approvedData.providerRateMinor) return;
+        const marginBps = BigInt(approvedData.marginBps ?? configuredMarginBps());
+        const sellingRateMinor = approvedData.customSellingRateMinor ?? Number(sellingPriceMinor(providerRateMinor, marginBps));
+        batch.set(approvedRefs[index], { providerRateMinor: Number(providerRateMinor), sellingRateMinor, name: item.name, categoryName: item.category, minQuantity: item.min, maxQuantity: item.max, refillSupported: item.refill, cancelSupported: item.cancel, updatedAt: FieldValue.serverTimestamp() }, { merge: true });
+        batch.create(db.collection("auditLogs").doc(), { action: "service_price_synchronized", targetType: "service", targetId: String(item.service), previousProviderRateMinor: approvedData.providerRateMinor, providerRateMinor: Number(providerRateMinor), sellingRateMinor, createdAt: FieldValue.serverTimestamp(), actor: "system:service-sync" });
+        batchChanges += 2;
+        repriced += 1;
       });
 
       if (batchChanges > 0) {
@@ -50,8 +66,8 @@ export async function GET(request: Request) {
       }
     }
 
-    await db.collection("providerSyncState").doc("services").set({ completedAt: FieldValue.serverTimestamp(), serviceCount: rows.length, changedCount: changed }, { merge: true });
-    return Response.json({ ok: true, synced: rows.length, changed });
+    await db.collection("providerSyncState").doc("services").set({ completedAt: FieldValue.serverTimestamp(), serviceCount: rows.length, changedCount: changed, repricedCount: repriced }, { merge: true });
+    return Response.json({ ok: true, synced: rows.length, changed, repriced });
   } catch (error) {
     console.error(JSON.stringify({ event: "service_sync_failed", message: error instanceof Error ? error.message : "unknown" }));
     return Response.json({ error: "Service synchronization failed" }, { status: 502 });

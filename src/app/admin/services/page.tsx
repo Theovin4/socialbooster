@@ -1,7 +1,7 @@
 import { AppShell } from "@/components/app-shell";
 import { adminDb } from "@/lib/firebase/admin";
 import { isFirestoreQuotaError } from "@/lib/firebase/errors";
-import { approveService, setServiceActive } from "./actions";
+import { approveService, setServiceActive, setServicePriceOverride } from "./actions";
 
 export const dynamic = "force-dynamic";
 
@@ -51,7 +51,11 @@ export default async function AdminServices() {
                   <p className="muted" style={{ margin: 0 }}>ID {doc.id} · Provider rate ${provider.rateText}/1,000 · Min {provider.minQuantity} · Max {provider.maxQuantity} · Refill {provider.refillSupported ? "Yes" : "No"} · Cancel {provider.cancelSupported ? "Yes" : "No"}</p>
                 </div>
                 {local ? (
-                  <form action={setServiceActive}><input type="hidden" name="id" value={doc.id} /><input type="hidden" name="active" value={active ? "false" : "true"} /><button className={`btn ${active ? "" : "primary"}`}>{active ? "Disable" : "Enable"}</button></form>
+                  <div style={{ display: "grid", gap: 8, minWidth: 210 }}>
+                    <form action={setServicePriceOverride} style={{ display: "flex", gap: 6 }}><input type="hidden" name="id" value={doc.id} /><input className="field" name="price" inputMode="decimal" placeholder="USD per 1,000" aria-label={`Price override for ${provider.name}`} /><button className="btn">Set price</button></form>
+                    {local.belowMinimumMargin ? <small style={{ color: "#fbbf24" }}>Warning: this override is below the configured minimum margin.</small> : null}
+                    <form action={setServiceActive}><input type="hidden" name="id" value={doc.id} /><input type="hidden" name="active" value={active ? "false" : "true"} /><button className={`btn ${active ? "" : "primary"}`} style={{ width: "100%" }}>{active ? "Disable" : "Enable"}</button></form>
+                  </div>
                 ) : (
                   <form action={approveService}><input type="hidden" name="id" value={doc.id} /><button className="btn primary">Approve at 40% margin</button></form>
                 )}
