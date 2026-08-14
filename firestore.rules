@@ -9,6 +9,9 @@ service cloud.firestore {
     match /wallets/{userId} { allow read: if owns(userId) || admin(); allow write: if false; }
     match /walletTransactions/{id} { allow read: if signedIn() && (resource.data.userId == request.auth.uid || admin()); allow write: if false; }
     match /walletLedger/{id} { allow read: if signedIn() && (resource.data.walletUserId == request.auth.uid || admin()); allow write: if false; }
+    match /paymentIntents/{id} { allow read: if signedIn() && (resource.data.userId == request.auth.uid || admin()); allow write: if false; }
+    match /paymentEvents/{id} { allow read: if admin(); allow write: if false; }
+    match /fraudAlerts/{id} { allow read: if admin(); allow write: if false; }
     match /orders/{id} { allow read: if signedIn() && (resource.data.userId == request.auth.uid || admin()); allow write: if false; }
     match /orderEvents/{id} { allow read: if signedIn() && (resource.data.userId == request.auth.uid || admin()); allow write: if false; }
     match /refills/{id} { allow read: if signedIn() && (resource.data.userId == request.auth.uid || admin()); allow write: if false; }
