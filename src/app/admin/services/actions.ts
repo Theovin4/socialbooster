@@ -4,15 +4,14 @@ import { revalidatePath } from "next/cache";
 import { adminDb } from "@/lib/firebase/admin";
 import { requireAdmin } from "@/lib/firebase/session";
 import { configuredMarginBps, decimalToMinor, sellingPriceMinor } from "@/lib/money";
+import { synchronizeAllProviderServices } from "@/lib/services-sync";
 
 const refresh = () => { revalidatePath("/admin/services"); revalidatePath("/services"); };
 
 export async function syncAllServices() {
   await requireAdmin();
-  const secret = process.env.CRON_SECRET, app = process.env.NEXT_PUBLIC_APP_URL || "https://socialbooster-sigma.vercel.app";
-  if (!secret) throw new Error("Service synchronization is not configured");
-  const response = await fetch(`${app}/api/cron/services`, { headers: { Authorization: `Bearer ${secret}` }, cache: "no-store" });
-  if (!response.ok) throw new Error("FollowsPanel service synchronization failed");
+  try { await synchronizeAllProviderServices(); }
+  catch (error) { console.error("[admin:services-sync] failed", { error: error instanceof Error ? error.message : String(error), stack: error instanceof Error ? error.stack : undefined }); throw new Error("Service synchronization failed. Check the production logs for the recorded cause."); }
   refresh();
 }
 
