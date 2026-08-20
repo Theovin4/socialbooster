@@ -3,7 +3,6 @@ import { FieldValue } from "firebase-admin/firestore";
 import { FollowsPanelClient } from "@/lib/providers/followspanel";
 import { adminDb } from "@/lib/firebase/admin";
 import { configuredMarginBps, decimalToMinor, sellingPriceMinor } from "@/lib/money";
-import { configuredUsdToNgnRateMicros, convertMinor } from "@/lib/currency";
 
 function valid(request: Request) {
   const expected = process.env.CRON_SECRET || "";
@@ -17,7 +16,6 @@ export async function GET(request: Request) {
   try {
     const rows = await new FollowsPanelClient().services();
     const db = adminDb();
-    const fxRateMicros = configuredUsdToNgnRateMicros();
     let changed = 0;
 
     let repriced = 0;
@@ -41,7 +39,7 @@ export async function GET(request: Request) {
           refillSupported: item.refill,
           cancelSupported: item.cancel,
           isActive: true,
-          providerCurrency: "USD",
+          providerCurrency: "NGN",
         };
         const syncFingerprint = createHash("sha256").update(JSON.stringify(service)).digest("hex");
         if (existing[index].data()?.syncFingerprint !== syncFingerprint) {
@@ -50,15 +48,13 @@ export async function GET(request: Request) {
         }
 
         const approved = existing[chunk.length + index];
-        if (!approved.exists) return;
-        const approvedData = approved.data()!;
+        const approvedData = approved.data() || {};
         const providerRateMinor = decimalToMinor(item.rate);
-        if (Number(providerRateMinor) === approvedData.providerRateMinor && approvedData.fxRateMicros === Number(fxRateMicros) && approvedData.pricingModel === "markup_v1") return;
+        if (approved.exists && Number(providerRateMinor) === approvedData.providerRateMinor && approvedData.pricingModel === "ngn_markup_v1" && approvedData.name === item.name && approvedData.minQuantity === item.min && approvedData.maxQuantity === item.max) return;
         const markupBps = configuredMarginBps();
-        const providerRateNgnMinor = convertMinor(providerRateMinor, fxRateMicros);
-        const sellingRateMinor = Number(sellingPriceMinor(providerRateNgnMinor, markupBps));
-        const grossMarginBps = Math.floor((sellingRateMinor - Number(providerRateNgnMinor)) * 10000 / sellingRateMinor);
-        batch.set(approvedRefs[index], { providerRateMinor: Number(providerRateMinor), providerRateNgnMinor: Number(providerRateNgnMinor), providerCurrency: "USD", sellingRateMinor, sellingCurrency: "NGN", fxRateMicros: Number(fxRateMicros), pricingModel: "markup_v1", markupBps: Number(markupBps), grossMarginBps, marginBps: FieldValue.delete(), customSellingRateMinor: FieldValue.delete(), name: item.name, categoryName: item.category, minQuantity: item.min, maxQuantity: item.max, refillSupported: item.refill, cancelSupported: item.cancel, updatedAt: FieldValue.serverTimestamp() }, { merge: true });
+        const sellingRateMinor = Number(sellingPriceMinor(providerRateMinor, markupBps));
+        const grossMarginBps = Math.floor((sellingRateMinor - Number(providerRateMinor)) * 10000 / sellingRateMinor);
+        batch.set(approvedRefs[index], { providerServiceId: item.service, providerRateMinor: Number(providerRateMinor), providerRateNgnMinor: Number(providerRateMinor), providerCurrency: "NGN", sellingRateMinor, sellingCurrency: "NGN", pricingModel: "ngn_markup_v1", markupBps: Number(markupBps), grossMarginBps, marginBps: FieldValue.delete(), customSellingRateMinor: FieldValue.delete(), name: item.name, categoryName: item.category, type: item.type, minQuantity: item.min, maxQuantity: item.max, refillSupported: item.refill, cancelSupported: item.cancel, active: true, autoImported: true, updatedAt: FieldValue.serverTimestamp(), ...(approved.exists ? {} : { createdAt: FieldValue.serverTimestamp() }) }, { merge: true });
         batch.create(db.collection("auditLogs").doc(), { action: "service_price_synchronized", targetType: "service", targetId: String(item.service), previousProviderRateMinor: approvedData.providerRateMinor, providerRateMinor: Number(providerRateMinor), sellingRateMinor, createdAt: FieldValue.serverTimestamp(), actor: "system:service-sync" });
         batchChanges += 2;
         repriced += 1;

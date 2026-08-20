@@ -30,9 +30,8 @@ export function quoteService(input: { ratePerThousandMinor: bigint; quantity: bi
 export function serviceSellingRateNgnMinor(service: { providerRateMinor?: unknown; sellingRateMinor?: unknown; pricingModel?: unknown; markupBps?: unknown }) {
   const providerRateMinor = Number(service.providerRateMinor), storedSellingRateMinor = Number(service.sellingRateMinor);
   if (!Number.isSafeInteger(providerRateMinor) || providerRateMinor < 0) throw new Error("Invalid provider service rate");
-  if (service.pricingModel === "markup_v1" && Number.isSafeInteger(storedSellingRateMinor)) return BigInt(storedSellingRateMinor);
+  if (service.pricingModel === "ngn_markup_v1" && Number.isSafeInteger(storedSellingRateMinor)) return BigInt(storedSellingRateMinor);
   const markupBps = Number(service.markupBps ?? 4000);
   if (!Number.isSafeInteger(markupBps) || markupBps < 0 || markupBps >= 10000) throw new Error("Invalid service markup");
-  const providerRateNgnMinor = convertMinor(BigInt(providerRateMinor), configuredUsdToNgnRateMicros());
-  return sellingPriceMinor(providerRateNgnMinor, BigInt(markupBps));
+  return sellingPriceMinor(BigInt(providerRateMinor), BigInt(markupBps));
 }

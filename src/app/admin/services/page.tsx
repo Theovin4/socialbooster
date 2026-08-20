@@ -1,7 +1,7 @@
 import { AppShell } from "@/components/app-shell";
 import { adminDb } from "@/lib/firebase/admin";
 import { isFirestoreQuotaError } from "@/lib/firebase/errors";
-import { approveService, setServiceActive, setServicePriceOverride } from "./actions";
+import { approveService, setServiceActive, setServicePriceOverride, syncAllServices } from "./actions";
 
 export const dynamic = "force-dynamic";
 
@@ -36,6 +36,7 @@ export default async function AdminServices() {
         <p className="muted" style={{ maxWidth: 760, lineHeight: 1.7 }}>
           Provider synchronization never changes these approval decisions. Review each service carefully before making it visible to customers. Showing the first 200 imported services.
         </p>
+        <form action={syncAllServices} style={{ marginTop: 18 }}><button className="btn primary">Synchronize all FollowsPanel services now</button></form>
         <div style={{ display: "grid", gap: 12, marginTop: 28 }}>
           {result.providers.length === 0 ? (
             <div className="glass card"><h2>No provider services found</h2><p className="muted">Run the protected service synchronization first, then refresh this page.</p></div>
