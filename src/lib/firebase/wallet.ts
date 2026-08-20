@@ -36,7 +36,11 @@ export async function postWallet(input: WalletEntry) {
     if (existing.exists) return { transactionId: transactionRef.id, duplicate: true };
     const current = wallet.exists ? Number(wallet.get("availableMinor") ?? wallet.get("balanceMinor") ?? 0) : 0;
     const reserved = wallet.exists ? Number(wallet.get("reservedMinor") ?? 0) : 0;
-    const currency = wallet.exists ? String(wallet.get("currency") || input.currency) : input.currency;
+    const existingCurrency = wallet.exists ? String(wallet.get("currency") || input.currency) : input.currency;
+    // Wallet pages are created eagerly in USD. An untouched, empty wallet may safely
+    // adopt the currency of its first posted entry; funded wallets remain single-currency.
+    const canAdoptCurrency = current === 0 && reserved === 0;
+    const currency = existingCurrency === input.currency || canAdoptCurrency ? input.currency : existingCurrency;
     if (currency !== input.currency) throw new Error("Wallet currency mismatch");
     const next = current + input.deltaMinor;
     if (!Number.isSafeInteger(next) || next < 0) throw new Error("Insufficient funds");

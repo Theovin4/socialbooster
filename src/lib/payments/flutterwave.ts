@@ -7,6 +7,12 @@ export function verifyFlutterwaveSignature(rawBody: string, signature: string | 
   const expected = createHmac("sha256", secret).update(rawBody).digest("base64");
   return expected.length === signature.length && timingSafeEqual(Buffer.from(expected), Buffer.from(signature));
 }
+export function verifyFlutterwaveLegacyHash(hash: string | null, secret = process.env.FLUTTERWAVE_WEBHOOK_SECRET_HASH || "") {
+  if (!secret || !hash) return false;
+  const expected = Buffer.from(secret);
+  const received = Buffer.from(hash);
+  return expected.length === received.length && timingSafeEqual(expected, received);
+}
 export async function verifyFlutterwaveTransaction(id: number) {
   const key = process.env.FLUTTERWAVE_SECRET_KEY;
   if (!key) throw new Error("Flutterwave is not configured");

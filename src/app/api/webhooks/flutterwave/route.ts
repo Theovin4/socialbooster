@@ -1,13 +1,15 @@
 import { z } from "zod";
 import { adminDb } from "@/lib/firebase/admin";
 import { postWallet } from "@/lib/firebase/wallet";
-import { verifyFlutterwaveSignature, verifyFlutterwaveTransaction } from "@/lib/payments/flutterwave";
+import { verifyFlutterwaveLegacyHash, verifyFlutterwaveSignature, verifyFlutterwaveTransaction } from "@/lib/payments/flutterwave";
 import { decimalToMinor } from "@/lib/money";
 
 const eventSchema = z.object({ id: z.coerce.number().int().positive().optional(), data: z.object({ id: z.coerce.number().int().positive(), tx_ref: z.string() }).optional() });
 export async function POST(request: Request) {
   const raw = await request.text();
-  if (!verifyFlutterwaveSignature(raw, request.headers.get("flutterwave-signature"))) return Response.json({ error: "Invalid signature" }, { status: 401 });
+  const validSignature = verifyFlutterwaveSignature(raw, request.headers.get("flutterwave-signature"))
+    || verifyFlutterwaveLegacyHash(request.headers.get("verif-hash"));
+  if (!validSignature) return Response.json({ error: "Invalid signature" }, { status: 401 });
   const event = eventSchema.parse(JSON.parse(raw)), transactionId = event.data?.id ?? event.id;
   if (!transactionId) return Response.json({ received: true });
   const verified = await verifyFlutterwaveTransaction(transactionId), db = adminDb(), intentRef = db.collection("paymentIntents").doc(verified.tx_ref), intent = await intentRef.get();
