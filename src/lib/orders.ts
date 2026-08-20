@@ -3,7 +3,7 @@ import { FieldValue } from "firebase-admin/firestore";
 import { adminDb } from "./firebase/admin";
 import { postWallet } from "./firebase/wallet";
 import { serviceCostMinor } from "./money";
-import { configuredUsdToNgnRateMicros, convertMinor } from "./currency";
+import { configuredUsdToNgnRateMicros, convertMinor, serviceSellingRateNgnMinor } from "./currency";
 import { FollowsPanelClient, ProviderError } from "./providers/followspanel";
 
 export type NewOrder = { userId: string; serviceId: string; link: string; quantity: number; idempotencyKey: string };
@@ -21,7 +21,7 @@ export async function createAndSubmitOrder(input: NewOrder) {
     const providerCostMinor = Number(serviceCostMinor(BigInt(data.providerRateMinor), BigInt(input.quantity)));
     const fxRateMicros = BigInt(data.fxRateMicros ?? configuredUsdToNgnRateMicros());
     const convertedProviderCostMinor = Number(convertMinor(BigInt(providerCostMinor), fxRateMicros));
-    const sellingRateMinor = data.sellingCurrency === "NGN" ? BigInt(data.sellingRateMinor) : convertMinor(BigInt(data.sellingRateMinor), fxRateMicros);
+    const sellingRateMinor = serviceSellingRateNgnMinor(data);
     const customerPriceMinor = Number(serviceCostMinor(sellingRateMinor, BigInt(input.quantity)));
     const available = wallet.exists ? Number(wallet.get("availableMinor") ?? wallet.get("balanceMinor") ?? 0) : 0, currency = wallet.exists ? String(wallet.get("currency") || "USD") : "USD";
     if (currency !== "NGN") throw new Error("This service requires a naira wallet");
@@ -30,7 +30,8 @@ export async function createAndSubmitOrder(input: NewOrder) {
     transaction.set(walletRef, { availableMinor: next, balanceMinor: next, version: FieldValue.increment(1), updatedAt: FieldValue.serverTimestamp() }, { merge: true });
     transaction.create(db.collection("walletTransactions").doc(walletTransactionId), { userId: input.userId, type: "order_debit", deltaMinor: -customerPriceMinor, currency, idempotencyKey: walletTransactionId, reference: orderRef.id, balanceBeforeMinor: available, balanceAfterMinor: next, status: "posted", createdAt: FieldValue.serverTimestamp() });
     transaction.create(db.collection("walletLedger").doc(walletTransactionId), { walletUserId: input.userId, transactionId: walletTransactionId, type: "order_debit", deltaMinor: -customerPriceMinor, currency, balanceBeforeMinor: available, balanceAfterMinor: next, reference: orderRef.id, createdAt: FieldValue.serverTimestamp() });
-    const order = { userId: input.userId, serviceId: input.serviceId, serviceName: data.name, providerServiceId: data.providerServiceId, link: input.link, quantity: input.quantity, currency, sellingRateMinor: Number(sellingRateMinor), providerCurrency: "USD", providerRateMinor: data.providerRateMinor, providerCostMinor, convertedProviderCostMinor, fxRateMicros: Number(fxRateMicros), customerPriceMinor, grossProfitMinor: customerPriceMinor - convertedProviderCostMinor, marginBps: data.marginBps, refillSupported: data.refillSupported, cancelSupported: data.cancelSupported, status: "submitting", idempotencyKey: input.idempotencyKey, createdAt: FieldValue.serverTimestamp(), updatedAt: FieldValue.serverTimestamp() };
+    const grossProfitMinor = customerPriceMinor - convertedProviderCostMinor;
+    const order = { userId: input.userId, serviceId: input.serviceId, serviceName: data.name, providerServiceId: data.providerServiceId, link: input.link, quantity: input.quantity, currency, sellingRateMinor: Number(sellingRateMinor), providerCurrency: "USD", providerRateMinor: data.providerRateMinor, providerCostMinor, convertedProviderCostMinor, fxRateMicros: Number(fxRateMicros), customerPriceMinor, grossProfitMinor, markupBps: data.markupBps ?? 4000, grossMarginBps: Math.floor(grossProfitMinor * 10000 / customerPriceMinor), pricingModel: "markup_v1", refillSupported: data.refillSupported, cancelSupported: data.cancelSupported, status: "submitting", idempotencyKey: input.idempotencyKey, createdAt: FieldValue.serverTimestamp(), updatedAt: FieldValue.serverTimestamp() };
     transaction.create(orderRef, order); transaction.create(db.collection("orderEvents").doc(), { orderId: orderRef.id, userId: input.userId, status: "submitting", createdAt: FieldValue.serverTimestamp() });
     return order;
   });

@@ -53,12 +53,12 @@ export async function GET(request: Request) {
         if (!approved.exists) return;
         const approvedData = approved.data()!;
         const providerRateMinor = decimalToMinor(item.rate);
-        if (Number(providerRateMinor) === approvedData.providerRateMinor && approvedData.fxRateMicros === Number(fxRateMicros) && approvedData.sellingCurrency === "NGN") return;
-        const marginBps = BigInt(approvedData.marginBps ?? configuredMarginBps());
+        if (Number(providerRateMinor) === approvedData.providerRateMinor && approvedData.fxRateMicros === Number(fxRateMicros) && approvedData.pricingModel === "markup_v1") return;
+        const markupBps = configuredMarginBps();
         const providerRateNgnMinor = convertMinor(providerRateMinor, fxRateMicros);
-        const migratedCustomRate = approvedData.customSellingRateMinor == null ? null : approvedData.sellingCurrency === "NGN" ? Number(approvedData.customSellingRateMinor) : Number(convertMinor(BigInt(approvedData.customSellingRateMinor), fxRateMicros));
-        const sellingRateMinor = migratedCustomRate ?? Number(sellingPriceMinor(providerRateNgnMinor, marginBps));
-        batch.set(approvedRefs[index], { providerRateMinor: Number(providerRateMinor), providerRateNgnMinor: Number(providerRateNgnMinor), providerCurrency: "USD", sellingRateMinor, sellingCurrency: "NGN", fxRateMicros: Number(fxRateMicros), ...(migratedCustomRate === null ? {} : { customSellingRateMinor: migratedCustomRate }), name: item.name, categoryName: item.category, minQuantity: item.min, maxQuantity: item.max, refillSupported: item.refill, cancelSupported: item.cancel, updatedAt: FieldValue.serverTimestamp() }, { merge: true });
+        const sellingRateMinor = Number(sellingPriceMinor(providerRateNgnMinor, markupBps));
+        const grossMarginBps = Math.floor((sellingRateMinor - Number(providerRateNgnMinor)) * 10000 / sellingRateMinor);
+        batch.set(approvedRefs[index], { providerRateMinor: Number(providerRateMinor), providerRateNgnMinor: Number(providerRateNgnMinor), providerCurrency: "USD", sellingRateMinor, sellingCurrency: "NGN", fxRateMicros: Number(fxRateMicros), pricingModel: "markup_v1", markupBps: Number(markupBps), grossMarginBps, marginBps: FieldValue.delete(), customSellingRateMinor: FieldValue.delete(), name: item.name, categoryName: item.category, minQuantity: item.min, maxQuantity: item.max, refillSupported: item.refill, cancelSupported: item.cancel, updatedAt: FieldValue.serverTimestamp() }, { merge: true });
         batch.create(db.collection("auditLogs").doc(), { action: "service_price_synchronized", targetType: "service", targetId: String(item.service), previousProviderRateMinor: approvedData.providerRateMinor, providerRateMinor: Number(providerRateMinor), sellingRateMinor, createdAt: FieldValue.serverTimestamp(), actor: "system:service-sync" });
         batchChanges += 2;
         repriced += 1;
