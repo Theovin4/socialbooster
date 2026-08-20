@@ -1,1 +1,1 @@
-import{requireUser}from"@/lib/firebase/session";export default async function Layout({children}:{children:React.ReactNode}){await requireUser();return children}
+import type{Metadata}from"next";import{requireUser}from"@/lib/firebase/session";export const metadata:Metadata={robots:{index:false,follow:false}};export default async function Layout({children}:{children:React.ReactNode}){await requireUser();return children}

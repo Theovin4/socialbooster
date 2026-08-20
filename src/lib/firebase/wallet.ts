@@ -17,7 +17,7 @@ export function validateWalletEntry(input: WalletEntry) {
   if (input.type === "admin_adjustment" && (!input.reason || input.reason.trim().length < 5)) throw new Error("Admin adjustments require a reason");
 }
 
-export async function ensureWallet(userId: string, currency = "USD") {
+export async function ensureWallet(userId: string, currency = "NGN") {
   if (!userId) throw new Error("Invalid wallet user");
   if (!CURRENCIES.has(currency)) throw new Error("Unsupported wallet currency");
   const db = adminDb(), ref = db.collection("wallets").doc(userId);

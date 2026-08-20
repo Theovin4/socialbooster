@@ -4,28 +4,16 @@ import { SiteFooter } from "@/components/site-footer";
 import { SiteHeader } from "@/components/site-header";
 import { adminDb } from "@/lib/firebase/admin";
 import { isFirestoreQuotaError } from "@/lib/firebase/errors";
+import { configuredUsdToNgnRateMicros, convertMinor } from "@/lib/currency";
 import { formatMoney } from "@/lib/money";
 
-export const metadata: Metadata = { title: "Services", description: "Browse approved social media marketing services with clear limits, support options and transparent pricing." };
+export const metadata: Metadata = { title: "Social Media Marketing Services in Nigeria", description: "Browse Instagram, TikTok, YouTube, Facebook, X and Telegram marketing services priced transparently in Nigerian naira.", alternates: { canonical: "/services" } };
 export const dynamic = "force-dynamic";
-
-type CatalogService = { id: string; name: string; categoryName: string; minQuantity: number; maxQuantity: number; refillSupported: boolean; cancelSupported: boolean; sellingRateMinor: number; providerCurrency: string };
+type CatalogService = { id: string; name: string; categoryName: string; minQuantity: number; maxQuantity: number; refillSupported: boolean; cancelSupported: boolean; sellingRateMinor: number; sellingCurrency?: string };
 
 export default async function Services({ searchParams }: { searchParams: Promise<{ q?: string }> }) {
-  const { q = "" } = await searchParams;
-  const normalized = q.trim().toLowerCase();
-  let services: CatalogService[] = [];
-  let quotaExhausted = false;
-
-  try {
-    const snapshot = await adminDb().collection("services").where("active", "==", true).limit(200).get();
-    services = snapshot.docs
-      .map((doc) => ({ id: doc.id, ...doc.data() } as CatalogService))
-      .filter((item) => !normalized || item.name.toLowerCase().includes(normalized) || item.categoryName.toLowerCase().includes(normalized));
-  } catch (error) {
-    if (!isFirestoreQuotaError(error)) throw error;
-    quotaExhausted = true;
-  }
-
-  return <><SiteHeader /><main className="shell" style={{ minHeight: "65vh", padding: "80px 0" }}><span className="eyebrow">Approved catalog</span><h1 style={{ fontSize: "clamp(2.8rem,7vw,5rem)", letterSpacing: "-.055em", margin: "14px 0" }}>Find the right service.</h1><p className="muted" style={{ fontSize: 18, maxWidth: 720, lineHeight: 1.7 }}>Only services reviewed and approved by Social Booster appear here. Prices shown are per 1,000 units and use the configured gross margin.</p><form style={{ display: "flex", gap: 10, maxWidth: 760, margin: "32px 0" }}><input className="field" name="q" defaultValue={q} aria-label="Search approved services" placeholder="Search a platform, category, or service" /><button className="btn primary">Search</button></form>{quotaExhausted ? <div className="glass card"><h2>Catalog temporarily unavailable</h2><p className="muted">We are restoring database access. Please check again shortly.</p></div> : services.length === 0 ? <div className="glass card"><h2>No approved services found</h2><p className="muted">The catalog is being reviewed. Check again soon or try a different search.</p></div> : <div style={{ display: "grid", gap: 14 }}>{services.map((service) => <article className="glass card" key={service.id}><div style={{ display: "flex", justifyContent: "space-between", gap: 18, flexWrap: "wrap" }}><div><p className="eyebrow" style={{ margin: 0 }}>{service.categoryName}</p><h2 style={{ fontSize: 20, margin: "9px 0" }}>{service.name}</h2><p className="muted" style={{ margin: 0 }}>Min {service.minQuantity.toLocaleString()} · Max {service.maxQuantity.toLocaleString()} · Refill {service.refillSupported ? "Available" : "Not available"} · Cancellation {service.cancelSupported ? "Supported" : "Not supported"}</p></div><div style={{ textAlign: "right" }}><strong style={{ fontSize: 25 }}>{formatMoney(BigInt(service.sellingRateMinor), service.providerCurrency || "USD")}</strong><p className="muted" style={{ margin: "5px 0 12px" }}>per 1,000</p><Link className="btn" href={`/services/${service.id}`}>View details</Link></div></div></article>)}</div>}</main><SiteFooter /></>;
+  const { q = "" } = await searchParams, normalized = q.trim().toLowerCase();
+  let services: CatalogService[] = [], quotaExhausted = false;
+  try { const snapshot = await adminDb().collection("services").where("active", "==", true).limit(200).get(); services = snapshot.docs.map((doc) => { const data = doc.data(); return { id: doc.id, ...data, sellingRateMinor: data.sellingCurrency === "NGN" ? data.sellingRateMinor : Number(convertMinor(BigInt(data.sellingRateMinor), configuredUsdToNgnRateMicros())) } as CatalogService; }).filter((item) => !normalized || item.name.toLowerCase().includes(normalized) || item.categoryName.toLowerCase().includes(normalized)); } catch (error) { if (!isFirestoreQuotaError(error)) throw error; quotaExhausted = true; }
+  return <><SiteHeader /><main className="shell" style={{ minHeight: "65vh", padding: "80px 0" }}><span className="eyebrow">Social media services in Nigeria</span><h1 style={{ fontSize: "clamp(2.8rem,7vw,5rem)", letterSpacing: "-.055em", margin: "14px 0" }}>Marketing services priced in naira.</h1><p className="muted" style={{ fontSize: 18, maxWidth: 760, lineHeight: 1.7 }}>Browse reviewed services for Nigerian creators, brands and resellers. All customer prices are displayed in NGN with clear quantity limits, refill availability and cancellation support.</p><form style={{ display: "flex", gap: 10, maxWidth: 760, margin: "32px 0" }}><input className="field" name="q" defaultValue={q} aria-label="Search social media services in Nigeria" placeholder="Search Instagram, TikTok, YouTube…" /><button className="btn primary">Search</button></form>{quotaExhausted ? <div className="glass card"><h2>Catalog temporarily unavailable</h2><p className="muted">Please check again shortly.</p></div> : services.length === 0 ? <div className="glass card"><h2>No approved services found</h2><p className="muted">Try a different platform or service name.</p></div> : <div style={{ display: "grid", gap: 14 }}>{services.map((service) => <article className="glass card" key={service.id}><div style={{ display: "flex", justifyContent: "space-between", gap: 18, flexWrap: "wrap" }}><div><p className="eyebrow" style={{ margin: 0 }}>{service.categoryName}</p><h2 style={{ fontSize: 20, margin: "9px 0" }}>{service.name}</h2><p className="muted" style={{ margin: 0 }}>Min {service.minQuantity.toLocaleString("en-NG")} · Max {service.maxQuantity.toLocaleString("en-NG")} · Refill {service.refillSupported ? "Available" : "Not available"} · Cancellation {service.cancelSupported ? "Supported" : "Not supported"}</p></div><div style={{ textAlign: "right" }}><strong style={{ fontSize: 25 }}>{formatMoney(BigInt(service.sellingRateMinor), "NGN")}</strong><p className="muted" style={{ margin: "5px 0 12px" }}>per 1,000</p><Link className="btn" href={`/services/${service.id}`}>View details</Link></div></div></article>)}</div>}</main><SiteFooter /></>;
 }

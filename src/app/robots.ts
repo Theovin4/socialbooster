@@ -1,1 +1,3 @@
-import type{MetadataRoute}from"next";export default function robots():MetadataRoute.Robots{return{rules:{userAgent:"*",allow:"/",disallow:["/dashboard/","/admin/","/api/internal/"]},sitemap:"https://socialbooster.vercel.app/sitemap.xml"}}
+import type { MetadataRoute } from "next";
+const siteUrl = process.env.NEXT_PUBLIC_APP_URL || "https://socialbooster-sigma.vercel.app";
+export default function robots(): MetadataRoute.Robots { return { rules: [{ userAgent: "*", allow: "/", disallow: ["/dashboard/", "/admin/", "/api/", "/login", "/register", "/forgot-password"] }, { userAgent: "Googlebot", allow: "/", disallow: ["/dashboard/", "/admin/", "/api/"] }], sitemap: `${siteUrl}/sitemap.xml`, host: siteUrl }; }
