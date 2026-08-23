@@ -3,7 +3,7 @@
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { useState } from "react";
-import { BadgeDollarSign, ClipboardList, Home, Layers3, LogOut, Menu, PlusCircle, ReceiptText, RefreshCcw, ShieldCheck, WalletCards, X } from "lucide-react";
+import { BadgeDollarSign, ClipboardList, Headphones, Home, Layers3, LogOut, Menu, PlusCircle, ReceiptText, RefreshCcw, ShieldCheck, WalletCards, X } from "lucide-react";
 import { Logo } from "./logo";
 
 const customerLinks = [
@@ -14,6 +14,7 @@ const customerLinks = [
   { label: "Transactions", href: "/dashboard/transactions", icon: ReceiptText },
   { label: "Mass order", href: "/dashboard/mass-order", icon: Layers3 },
   { label: "Refills", href: "/dashboard/refills", icon: RefreshCcw },
+  { label: "Support", href: "/dashboard/support", icon: Headphones },
 ];
 
 const adminLinks = [
@@ -21,6 +22,7 @@ const adminLinks = [
   { label: "Services", href: "/admin/services", icon: Layers3 },
   { label: "Transactions", href: "/admin/transactions", icon: ReceiptText },
   { label: "Wallets", href: "/admin/wallets", icon: BadgeDollarSign },
+  { label: "Support", href: "/admin/support", icon: Headphones },
 ];
 
 export function AppShell({ admin = false, children }: { admin?: boolean; children: React.ReactNode }) {

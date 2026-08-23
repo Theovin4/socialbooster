@@ -3,7 +3,7 @@ import { adminDb } from "./firebase/admin";
 import { postWallet } from "./firebase/wallet";
 import { serviceCostMinor } from "./money";
 import { FollowsPanelClient } from "./providers/followspanel";
-import { mapProviderStatus } from "./order-status";
+import { verifiedProviderStatus } from "./order-status";
 
 const ACTIVE_STATUSES = ["pending", "processing", "in_progress", "cancel_requested"];
 const STALE_AFTER_MS = 60_000;
@@ -29,10 +29,11 @@ export async function synchronizeOrderDocuments(documents: DocumentSnapshot[], f
   for (const doc of eligible) {
     const provider = statuses[String(doc.get("providerOrderId"))];
     if (!provider) continue;
-    const status = mapProviderStatus(provider.status);
-    const previous = doc.get("status");
     const startCount = integer(provider.start_count);
     const remains = integer(provider.remains);
+    const status = verifiedProviderStatus(provider.status, startCount, remains);
+    const previous = doc.get("status");
+    console.info("[order-sync] provider status", { orderId: doc.id, providerOrderId: doc.get("providerOrderId"), providerStatus: provider.status, resolvedStatus: status, startCount, remains });
     const update: Record<string, unknown> = { status, providerStatus: provider.status, providerCharge: provider.charge || null, lastProviderUpdate: FieldValue.serverTimestamp(), updatedAt: FieldValue.serverTimestamp() };
     if (startCount !== null) update.startCount = startCount;
     if (remains !== null) update.remains = remains;
@@ -56,6 +57,6 @@ export async function synchronizeOrderDocuments(documents: DocumentSnapshot[], f
 
 export async function synchronizeUserOrders(userId: string, force = false) {
   const snapshot = await adminDb().collection("orders").where("userId", "==", userId).limit(100).get();
-  const active = snapshot.docs.filter((doc) => ACTIVE_STATUSES.includes(String(doc.get("status"))));
-  return synchronizeOrderDocuments(active, force);
+  const eligible = force ? snapshot.docs.filter((doc) => Number.isInteger(doc.get("providerOrderId"))) : snapshot.docs.filter((doc) => ACTIVE_STATUSES.includes(String(doc.get("status"))));
+  return synchronizeOrderDocuments(eligible, force);
 }
