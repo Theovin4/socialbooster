@@ -1,1 +1,5 @@
-import{AppShell}from"@/components/app-shell";const allowed=["new-order","mass-order","orders","wallet","transactions","refills","tickets","api","notifications","settings","security"];export default async function Page({params}:{params:Promise<{section:string}>}){const{section}=await params;if(!allowed.includes(section))return null;return <AppShell><span className="eyebrow">Customer workspace</span><h1 style={{fontSize:42,textTransform:"capitalize"}}>{section.replaceAll("-"," ")}</h1><div className="glass card"><p className="muted">Secure account data appears here after Firebase is configured and the signed-in session passes server authorization.</p></div></AppShell>}
+import { notFound } from "next/navigation";
+
+export default function DashboardSectionPage() {
+  notFound();
+}
