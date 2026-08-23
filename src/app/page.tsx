@@ -5,7 +5,7 @@ import { SiteFooter } from "@/components/site-footer";
 const platforms = ["Instagram", "TikTok", "YouTube", "Facebook", "X / Twitter", "Telegram"];
 const benefits = [
   { title: "Transparent naira pricing", text: "See the current NGN price, quantity limits and service support before placing an order." },
-  { title: "Verified Nigerian payments", text: "Flutterwave payments are verified server-side before an immutable wallet credit is posted." },
+  { title: "Verified Nigerian payments", text: "Flutterwave payments are confirmed before funds are added to your wallet." },
   { title: "Built for Nigerian resellers", text: "Manage orders and status updates from one secure workspace designed for creators, agencies and resellers." },
 ];
 
