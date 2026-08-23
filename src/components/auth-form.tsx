@@ -17,7 +17,7 @@ function messageFor(error: unknown, mode: "login" | "register" | "reset"): Notic
   if (code === "auth/weak-password") return { kind: "error", title: "Choose a stronger password", message: "Use at least 10 characters with a mix of letters, numbers and symbols." };
   if (code === "auth/invalid-email") return { kind: "error", title: "Check your email", message: "Enter a valid email address and try again." };
   if (code === "auth/too-many-requests") return { kind: "error", title: "Please wait before retrying", message: "Too many attempts were made. Wait a few minutes or reset your password." };
-  if (error instanceof Error && error.message === "EMAIL_NOT_VERIFIED") return { kind: "info", title: "Verify your email first", message: "Open the activation email we sent, click the verification link, then return here to sign in." };
+  if (error instanceof Error && error.message === "EMAIL_NOT_VERIFIED") return { kind: "info", title: "Verify your email first", message: "Open the activation email and click the verification link. If it is not in your Inbox, check Spam, Junk or Promotions and mark it as Not spam." };
   return { kind: "error", title: mode === "login" ? "Sign-in unsuccessful" : mode === "register" ? "Registration unsuccessful" : "Request unsuccessful", message: "We could not complete that request. Check your connection and try again." };
 }
 
@@ -29,13 +29,14 @@ export function AuthForm({ mode, initialNotice }: { mode: "login" | "register" |
     const data = new FormData(event.currentTarget), email = String(data.get("email") || "").trim(), password = String(data.get("password") || ""), firstName = String(data.get("firstName") || "").trim(), lastName = String(data.get("lastName") || "").trim();
     try {
       const auth = firebaseAuth();
-      if (mode === "reset") { await sendPasswordResetEmail(auth, email); router.push("/login?notice=reset-sent"); return; }
+      const actionSettings = { url: `${window.location.origin}/login`, handleCodeInApp: false };
+      if (mode === "reset") { await sendPasswordResetEmail(auth, email, actionSettings); router.push("/login?notice=reset-sent"); return; }
       await setPersistence(auth, inMemoryPersistence);
       if (mode === "register") {
         if (!firstName || !lastName) throw new Error("FULL_NAME_REQUIRED");
         const credential = await createUserWithEmailAndPassword(auth, email, password);
         await updateProfile(credential.user, { displayName: `${firstName} ${lastName}` });
-        await sendEmailVerification(credential.user); await auth.signOut(); router.push("/login?notice=verify-email"); return;
+        await sendEmailVerification(credential.user, actionSettings); await auth.signOut(); router.push("/login?notice=verify-email"); return;
       }
       const credential = await signInWithEmailAndPassword(auth, email, password);
       if (!credential.user.emailVerified) { await auth.signOut(); throw new Error("EMAIL_NOT_VERIFIED"); }
