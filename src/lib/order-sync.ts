@@ -4,6 +4,7 @@ import { postWallet } from "./firebase/wallet";
 import { serviceCostMinor } from "./money";
 import { FollowsPanelClient } from "./providers/followspanel";
 import { verifiedProviderStatus } from "./order-status";
+import { sendUserEmail } from "./email";
 
 const ACTIVE_STATUSES = ["pending", "processing", "in_progress", "cancel_requested"];
 const STALE_AFTER_MS = 60_000;
@@ -42,6 +43,7 @@ export async function synchronizeOrderDocuments(documents: DocumentSnapshot[], f
       updated += 1;
       await db.collection("orderEvents").add({ orderId: doc.id, userId: doc.get("userId"), status, previousStatus: previous, createdAt: FieldValue.serverTimestamp() });
       await db.collection("notifications").add({ userId: doc.get("userId"), type: "order_status", title: `Order ${status.replaceAll("_", " ")}`, orderId: doc.id, read: false, createdAt: FieldValue.serverTimestamp() });
+      if (process.env.RESEND_API_KEY && process.env.EMAIL_FROM) await sendUserEmail(String(doc.get("userId")), { subject: `Order update: ${status.replaceAll("_", " ")}`, title: "Your order status has changed", message: `Order #${doc.id.slice(0, 8)} is now ${status.replaceAll("_", " ")}. Sign in to review the latest delivery progress.`, buttonLabel: "View order", buttonUrl: `${process.env.NEXT_PUBLIC_APP_URL || "https://socialbooster-sigma.vercel.app"}/dashboard/orders/${doc.id}` }).catch((error) => console.warn("[order-email] delivery failed", { orderId: doc.id, error: error instanceof Error ? error.message : "Unknown error" }));
     }
     if (["failed", "cancelled", "partial"].includes(status)) {
       const quantity = integer(String(doc.get("quantity") ?? "")) || 0;

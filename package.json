@@ -2,7 +2,9 @@
   "name": "socialbooster",
   "version": "0.1.0",
   "private": true,
-  "engines": {"node": ">=22"},
+  "engines": {
+    "node": ">=22"
+  },
   "scripts": {
     "dev": "next dev",
     "build": "next build",
@@ -13,6 +15,7 @@
     "admin:set": "node scripts/set-admin.mjs"
   },
   "dependencies": {
+    "exceljs": "^4.4.0",
     "firebase": "^12.16.0",
     "firebase-admin": "^14.2.0",
     "lucide-react": "^1.31.0",

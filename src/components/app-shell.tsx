@@ -3,7 +3,7 @@
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { useState } from "react";
-import { Activity, BadgeDollarSign, ClipboardList, Headphones, Home, Layers3, LogOut, Menu, PlusCircle, ReceiptText, RefreshCcw, ShieldCheck, WalletCards, X } from "lucide-react";
+import { Activity, BadgeDollarSign, ChartNoAxesCombined, ClipboardList, Headphones, Home, Layers3, LogOut, Menu, PlusCircle, ReceiptText, RefreshCcw, ShieldCheck, WalletCards, X } from "lucide-react";
 import { Logo } from "./logo";
 
 const customerLinks = [
@@ -22,6 +22,7 @@ const adminLinks = [
   { label: "Services", href: "/admin/services", icon: Layers3 },
   { label: "Transactions", href: "/admin/transactions", icon: ReceiptText },
   { label: "Wallets", href: "/admin/wallets", icon: BadgeDollarSign },
+  { label: "Finance", href: "/admin/finance", icon: ChartNoAxesCombined },
   { label: "Support", href: "/admin/support", icon: Headphones },
   { label: "Provider health", href: "/admin/provider", icon: Activity },
 ];

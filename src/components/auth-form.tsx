@@ -30,13 +30,13 @@ export function AuthForm({ mode, initialNotice }: { mode: "login" | "register" |
     try {
       const auth = firebaseAuth();
       const actionSettings = { url: `${window.location.origin}/login`, handleCodeInApp: false };
-      if (mode === "reset") { await sendPasswordResetEmail(auth, email, actionSettings); router.push("/login?notice=reset-sent"); return; }
+      if (mode === "reset") { const response = await fetch("/api/auth/email", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ type: "reset", email }) }); if (!response.ok) await sendPasswordResetEmail(auth, email, actionSettings); router.push("/login?notice=reset-sent"); return; }
       await setPersistence(auth, inMemoryPersistence);
       if (mode === "register") {
         if (!firstName || !lastName) throw new Error("FULL_NAME_REQUIRED");
         const credential = await createUserWithEmailAndPassword(auth, email, password);
         await updateProfile(credential.user, { displayName: `${firstName} ${lastName}` });
-        await sendEmailVerification(credential.user, actionSettings); await auth.signOut(); router.push("/login?notice=verify-email"); return;
+        const branded = await fetch("/api/auth/email", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ type: "verification", email, idToken: await credential.user.getIdToken(true) }) }); if (!branded.ok) await sendEmailVerification(credential.user, actionSettings); await auth.signOut(); router.push("/login?notice=verify-email"); return;
       }
       const credential = await signInWithEmailAndPassword(auth, email, password);
       if (!credential.user.emailVerified) { await auth.signOut(); throw new Error("EMAIL_NOT_VERIFIED"); }

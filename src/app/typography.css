@@ -1,0 +1,99 @@
+html {
+  font-size: 16px;
+}
+
+body {
+  font-size: 1rem;
+  line-height: 1.55;
+  text-rendering: optimizeLegibility;
+  -webkit-font-smoothing: antialiased;
+}
+
+h1,
+h2,
+h3,
+h4,
+p {
+  overflow-wrap: anywhere;
+}
+
+h1,
+h2,
+h3,
+h4 {
+  line-height: 1.16;
+  text-wrap: balance;
+}
+
+h1 {
+  font-size: clamp(2.25rem, 5vw, 4.5rem);
+  letter-spacing: -0.045em;
+}
+
+h2 {
+  font-size: clamp(1.5rem, 2.8vw, 2.35rem);
+  letter-spacing: -0.03em;
+}
+
+h3 {
+  font-size: clamp(1.125rem, 1.8vw, 1.35rem);
+  letter-spacing: -0.015em;
+}
+
+p,
+li {
+  max-width: 72ch;
+}
+
+.page-heading {
+  font-size: clamp(2.15rem, 5vw, 3.4rem);
+}
+
+.page-lead {
+  font-size: clamp(1rem, 1.25vw, 1.125rem);
+}
+
+.portal-link,
+.btn,
+.field,
+label {
+  font-size: 0.95rem;
+}
+
+.data-table {
+  font-size: 0.9375rem;
+}
+
+.data-table th,
+.eyebrow,
+.portal-role {
+  line-height: 1.35;
+}
+
+small,
+.muted {
+  line-height: 1.55;
+}
+
+@media (max-width: 600px) {
+  h1 {
+    font-size: clamp(2rem, 11vw, 3rem);
+  }
+
+  h2 {
+    font-size: clamp(1.4rem, 7vw, 2rem);
+  }
+
+  .page-heading {
+    font-size: clamp(2rem, 10vw, 2.75rem);
+  }
+
+  .card {
+    padding: 20px;
+  }
+
+  .data-table,
+  .mobile-service-list {
+    font-size: 0.9375rem;
+  }
+}
