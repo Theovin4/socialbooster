@@ -5,10 +5,13 @@ import { ensureWallet } from "@/lib/firebase/wallet";
 import { adminDb } from "@/lib/firebase/admin";
 import { formatMoney } from "@/lib/money";
 import { FundWallet } from "@/components/fund-wallet";
+import { reconcilePendingFlutterwavePayments } from "@/lib/payments/credit";
 
 export const dynamic = "force-dynamic";
 export default async function WalletPage({ searchParams }: { searchParams: Promise<{ payment?: string }> }) {
-  const user = await requireUser(), { payment } = await searchParams, ref = await ensureWallet(user.uid, "NGN"), snapshot = await ref.get(), data = snapshot.data()!;
+  const user = await requireUser(), { payment } = await searchParams;
+  await reconcilePendingFlutterwavePayments(user.uid);
+  const ref = await ensureWallet(user.uid, "NGN"), snapshot = await ref.get(), data = snapshot.data()!;
   const available = Number(data.availableMinor ?? data.balanceMinor ?? 0), reserved = Number(data.reservedMinor ?? 0), currency = String(data.currency || "NGN");
   const transactionSnapshot = await adminDb().collection("walletTransactions").where("userId", "==", user.uid).limit(100).get();
   const recent = transactionSnapshot.docs.sort((a, b) => (b.get("createdAt")?.toMillis?.() || 0) - (a.get("createdAt")?.toMillis?.() || 0)).slice(0, 5);

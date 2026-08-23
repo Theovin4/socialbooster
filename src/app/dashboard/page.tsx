@@ -5,11 +5,14 @@ import { adminDb } from "@/lib/firebase/admin";
 import { requireUser } from "@/lib/firebase/session";
 import { ensureWallet } from "@/lib/firebase/wallet";
 import { formatMoney } from "@/lib/money";
+import { reconcilePendingFlutterwavePayments } from "@/lib/payments/credit";
 
 export const dynamic = "force-dynamic";
 
 export default async function Dashboard() {
-  const user = await requireUser(), db = adminDb(), walletRef = await ensureWallet(user.uid, "NGN"), wallet = await walletRef.get(), walletData = wallet.data() || {};
+  const user = await requireUser(), db = adminDb();
+  await reconcilePendingFlutterwavePayments(user.uid);
+  const walletRef = await ensureWallet(user.uid, "NGN"), wallet = await walletRef.get(), walletData = wallet.data() || {};
   const available = Number(walletData.availableMinor ?? walletData.balanceMinor ?? 0), currency = String(walletData.currency || "NGN");
   const orderSnapshot = await db.collection("orders").where("userId", "==", user.uid).limit(250).get();
   const sorted = orderSnapshot.docs.sort((a, b) => (b.get("createdAt")?.toMillis?.() || 0) - (a.get("createdAt")?.toMillis?.() || 0));

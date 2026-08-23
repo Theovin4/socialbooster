@@ -1,6 +1,6 @@
 import { z } from "zod";
 import { adminDb } from "@/lib/firebase/admin";
-import { postWallet } from "@/lib/firebase/wallet";
+import { creditVerifiedPayment } from "@/lib/payments/credit";
 import { verifyFlutterwaveLegacyHash, verifyFlutterwaveSignature, verifyFlutterwaveTransaction } from "@/lib/payments/flutterwave";
 import { decimalToMinor } from "@/lib/money";
 
@@ -16,8 +16,7 @@ export async function POST(request: Request) {
   if (!intent.exists) return Response.json({ error: "Unknown payment reference" }, { status: 400 });
   const expected = intent.data()!;
   if (verified.status !== "successful" || Number(decimalToMinor(String(verified.amount))) !== expected.amountMinor || verified.currency !== expected.currency) return Response.json({ error: "Payment details do not match" }, { status: 400 });
-  await postWallet({ userId: expected.userId, type: "deposit", deltaMinor: expected.amountMinor, currency: expected.currency, idempotencyKey: `flutterwave:${transactionId}`, reference: verified.tx_ref });
-  await intentRef.set({ status: "paid", providerTransactionId: String(transactionId), verifiedAt: new Date() }, { merge: true });
+  await creditVerifiedPayment({ provider: "flutterwave", reference: verified.tx_ref, providerTransactionId: String(transactionId), amountMinor: expected.amountMinor, currency: expected.currency });
   await db.collection("paymentEvents").doc(`flutterwave:${transactionId}`).set({provider:"flutterwave",reference:verified.tx_ref,providerTransactionId:String(transactionId),status:"processed",receivedAt:new Date()},{merge:true});
   return Response.json({ received: true });
 }

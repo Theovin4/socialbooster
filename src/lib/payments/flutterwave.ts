@@ -20,3 +20,12 @@ export async function verifyFlutterwaveTransaction(id: number) {
   if (!response.ok) throw new Error(`Flutterwave verification failed: ${response.status}`);
   return verifiedSchema.parse(await response.json()).data;
 }
+export async function verifyFlutterwaveTransactionByReference(reference: string) {
+  const key = process.env.FLUTTERWAVE_SECRET_KEY;
+  if (!key) throw new Error("Flutterwave is not configured");
+  const url = new URL("https://api.flutterwave.com/v3/transactions/verify_by_reference");
+  url.searchParams.set("tx_ref", reference);
+  const response = await fetch(url, { headers: { Authorization: `Bearer ${key}` }, cache: "no-store" });
+  if (!response.ok) throw new Error(`Flutterwave reference verification failed: ${response.status}`);
+  return verifiedSchema.parse(await response.json()).data;
+}

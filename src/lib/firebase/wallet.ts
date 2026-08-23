@@ -1,7 +1,8 @@
 import { FieldValue } from "firebase-admin/firestore";
 import { adminDb } from "./admin";
+import { configuredUsdToNgnRateMicros, convertMinor } from "../currency";
 
-export type LedgerType = "deposit" | "order_debit" | "refund" | "admin_adjustment" | "promotional_credit";
+export type LedgerType = "deposit" | "order_debit" | "refund" | "admin_adjustment" | "promotional_credit" | "currency_conversion";
 export type WalletEntry = { userId: string; type: LedgerType; deltaMinor: number; currency: string; idempotencyKey: string; reference?: string; reason?: string; actorUid?: string };
 
 const CURRENCIES = new Set(["USD", "GBP", "EUR", "NGN", "CAD", "AUD"]);
@@ -49,5 +50,23 @@ export async function postWallet(input: WalletEntry) {
     transaction.create(ledgerRef, { walletUserId: input.userId, transactionId: transactionRef.id, type: input.type, deltaMinor: input.deltaMinor, currency, balanceBeforeMinor: current, balanceAfterMinor: next, reference: input.reference || null, reason: input.reason || null, actorUid: input.actorUid || null, createdAt: FieldValue.serverTimestamp() });
     if (input.type === "admin_adjustment") transaction.create(auditRef, { action: "wallet_admin_adjustment", targetType: "wallet", targetId: input.userId, transactionId: transactionRef.id, deltaMinor: input.deltaMinor, currency, reason: input.reason, actorUid: input.actorUid, createdAt: FieldValue.serverTimestamp() });
     return { transactionId: transactionRef.id, duplicate: false };
+  });
+}
+
+export async function migrateLegacyUsdWalletToNgn(userId: string) {
+  const db = adminDb(), walletRef = db.collection("wallets").doc(userId), idempotencyKey = `migration:usd-ngn:${userId}`, transactionRef = db.collection("walletTransactions").doc(idempotencyKey), ledgerRef = db.collection("walletLedger").doc(idempotencyKey), auditRef = db.collection("auditLogs").doc(`wallet:${idempotencyKey}`);
+  return db.runTransaction(async (transaction) => {
+    const [existing, wallet] = await Promise.all([transaction.get(transactionRef), transaction.get(walletRef)]);
+    if (existing.exists || (wallet.exists && wallet.get("currency") === "NGN")) return { duplicate: true };
+    if (!wallet.exists || wallet.get("currency") !== "USD") throw new Error("Legacy USD wallet not found");
+    const sourceAmountMinor = Number(wallet.get("availableMinor") ?? wallet.get("balanceMinor") ?? 0), reservedMinor = Number(wallet.get("reservedMinor") ?? 0);
+    if (!Number.isSafeInteger(sourceAmountMinor) || sourceAmountMinor < 0 || reservedMinor !== 0) throw new Error("Legacy wallet cannot be converted automatically");
+    const rateMicros = configuredUsdToNgnRateMicros(), convertedAmountMinor = Number(convertMinor(BigInt(sourceAmountMinor), rateMicros));
+    const record = { userId, type: "currency_conversion", deltaMinor: convertedAmountMinor, currency: "NGN", sourceCurrency: "USD", sourceAmountMinor, exchangeRateMicros: Number(rateMicros), balanceBeforeMinor: 0, balanceAfterMinor: convertedAmountMinor, status: "posted", idempotencyKey, reason: "Legacy USD wallet converted to the NGN default", createdAt: FieldValue.serverTimestamp() };
+    transaction.set(walletRef, { currency: "NGN", availableMinor: convertedAmountMinor, reservedMinor: 0, balanceMinor: convertedAmountMinor, version: FieldValue.increment(1), updatedAt: FieldValue.serverTimestamp() }, { merge: true });
+    transaction.create(transactionRef, record);
+    transaction.create(ledgerRef, { ...record, walletUserId: userId, transactionId: idempotencyKey });
+    transaction.create(auditRef, { action: "wallet_currency_conversion", targetType: "wallet", targetId: userId, sourceCurrency: "USD", sourceAmountMinor, currency: "NGN", convertedAmountMinor, exchangeRateMicros: Number(rateMicros), createdAt: FieldValue.serverTimestamp() });
+    return { duplicate: false, sourceAmountMinor, convertedAmountMinor };
   });
 }
