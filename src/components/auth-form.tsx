@@ -23,7 +23,8 @@ export function AuthForm({mode}:{mode:"login"|"register"|"reset"}){
       const idToken=await credential.user.getIdToken();
       const response=await fetch("/api/auth/session",{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({idToken})});
       if(!response.ok)throw new Error("Session creation failed");
-      await auth.signOut();router.push("/dashboard");router.refresh();
+      const session=await response.json() as {admin?:boolean};
+      await auth.signOut();router.push(session.admin?"/admin":"/dashboard");router.refresh();
     }catch(e){setError(e instanceof Error?e.message:"Authentication failed");setBusy(false)}
   }
   return <form onSubmit={submit} style={{display:"grid",gap:14,marginTop:28}}>

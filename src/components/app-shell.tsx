@@ -1,2 +1,33 @@
-import Link from"next/link";import{Logo}from"./logo";
-export function AppShell({admin=false,children}:{admin?:boolean;children:React.ReactNode}){const links=admin?["users","services","orders","transactions","wallets","refills","tickets","blog","provider","payments","analytics","settings","audit-logs"]:["new-order","mass-order","orders","wallet","transactions","refills","tickets","api","notifications","settings","security"];const base=admin?"/admin":"/dashboard";return <div style={{minHeight:"100vh",display:"grid",gridTemplateColumns:"260px 1fr"}}><aside className="glass desktop" style={{borderRadius:0,padding:24}}><Logo/><p className="eyebrow" style={{marginTop:36}}>{admin?"Operations":"Workspace"}</p><nav style={{display:"grid",gap:5}}><Link className="btn" style={{justifyContent:"flex-start"}} href={base}>Overview</Link>{links.map(x=><Link className="btn" style={{justifyContent:"flex-start",textTransform:"capitalize"}} key={x} href={`${base}/${x}`}>{x.replaceAll("-"," ")}</Link>)}</nav></aside><main style={{padding:"clamp(22px,4vw,50px)",minWidth:0}}>{children}</main></div>}
+"use client";
+
+import Link from "next/link";
+import { usePathname, useRouter } from "next/navigation";
+import { useState } from "react";
+import { BadgeDollarSign, ClipboardList, Home, Layers3, LogOut, Menu, PlusCircle, ReceiptText, RefreshCcw, ShieldCheck, WalletCards, X } from "lucide-react";
+import { Logo } from "./logo";
+
+const customerLinks = [
+  { label: "Overview", href: "/dashboard", icon: Home },
+  { label: "New order", href: "/dashboard/new-order", icon: PlusCircle },
+  { label: "Orders", href: "/dashboard/orders", icon: ClipboardList },
+  { label: "Fund wallet", href: "/dashboard/wallet", icon: WalletCards },
+  { label: "Transactions", href: "/dashboard/transactions", icon: ReceiptText },
+  { label: "Mass order", href: "/dashboard/mass-order", icon: Layers3 },
+  { label: "Refills", href: "/dashboard/refills", icon: RefreshCcw },
+];
+
+const adminLinks = [
+  { label: "Overview", href: "/admin", icon: ShieldCheck },
+  { label: "Services", href: "/admin/services", icon: Layers3 },
+  { label: "Transactions", href: "/admin/transactions", icon: ReceiptText },
+  { label: "Wallets", href: "/admin/wallets", icon: BadgeDollarSign },
+];
+
+export function AppShell({ admin = false, children }: { admin?: boolean; children: React.ReactNode }) {
+  const pathname = usePathname(), router = useRouter(), [open, setOpen] = useState(false);
+  const links = admin ? adminLinks : customerLinks;
+  async function logout() { await fetch("/api/auth/session", { method: "DELETE" }); router.replace("/login"); router.refresh(); }
+  const navigation = <><div className="portal-brand"><Logo /><span className="portal-role">{admin ? "Secure administration" : "Customer portal"}</span></div><nav className="portal-nav" aria-label={admin ? "Admin navigation" : "Customer navigation"}>{links.map(({ label, href, icon: Icon }) => { const active = pathname === href || (href !== (admin ? "/admin" : "/dashboard") && pathname.startsWith(`${href}/`)); return <Link key={href} href={href} onClick={() => setOpen(false)} className={`portal-link${active ? " active" : ""}`}><Icon size={18} strokeWidth={1.8} /><span>{label}</span></Link>; })}</nav><div className="portal-sidebar-footer"><button className="portal-link portal-logout" onClick={logout}><LogOut size={18} /><span>Sign out</span></button><p>Protected by Firebase authentication</p></div></>;
+
+  return <div className="portal-layout"><aside className="portal-sidebar">{navigation}</aside><header className="portal-mobile-header"><Logo /><button className="icon-button" onClick={() => setOpen(true)} aria-label="Open navigation"><Menu /></button></header>{open ? <div className="portal-drawer-layer" role="dialog" aria-modal="true" aria-label="Navigation"><button className="portal-backdrop" onClick={() => setOpen(false)} aria-label="Close navigation" /><aside className="portal-drawer"><button className="icon-button portal-drawer-close" onClick={() => setOpen(false)} aria-label="Close navigation"><X /></button>{navigation}</aside></div> : null}<main className="portal-content">{children}</main></div>;
+}

@@ -1,7 +1,14 @@
 import { AppShell } from "@/components/app-shell";
+import { NewOrderForm, type OrderService } from "@/components/new-order-form";
 import { adminDb } from "@/lib/firebase/admin";
 import { serviceSellingRateNgnMinor } from "@/lib/currency";
-import { formatMoney } from "@/lib/money";
 import { submitOrder } from "../orders/actions";
+
 export const dynamic = "force-dynamic";
-export default async function NewOrderPage({ searchParams }: { searchParams: Promise<{ service?: string }> }) { const { service: selected } = await searchParams, snapshot = await adminDb().collection("services").where("active", "==", true).get(), docs = snapshot.docs.sort((a, b) => String(a.get("categoryName")).localeCompare(String(b.get("categoryName"))) || String(a.get("name")).localeCompare(String(b.get("name")))); return <AppShell><span className="eyebrow">Professional order workspace</span><h1 style={{ fontSize: 42 }}>New order</h1><div className="glass card"><form action={submitOrder} style={{ display: "grid", gap: 16 }}><label>Service<select className="field" name="serviceId" defaultValue={selected} required><option value="">Choose from all synchronized services</option>{docs.map((doc) => { const item = doc.data(); return <option value={doc.id} key={doc.id}>{item.categoryName} · {item.name} — {formatMoney(serviceSellingRateNgnMinor(item), "NGN")}/1,000</option>; })}</select></label><label>Target URL<input className="field" name="link" type="url" placeholder="https://..." required /></label><label>Quantity<input className="field" name="quantity" type="number" min="1" required /></label><label style={{ display: "flex", gap: 10 }}><input type="checkbox" name="confirmed" value="yes" required /> I confirm the target, service and quantity are correct and permitted.</label><button className="btn primary">Review and place NGN order</button></form></div></AppShell>; }
+
+export default async function NewOrderPage({ searchParams }: { searchParams: Promise<{ service?: string }> }) {
+  const { service } = await searchParams;
+  const snapshot = await adminDb().collection("services").where("active", "==", true).get();
+  const services: OrderService[] = snapshot.docs.map((doc) => { const item = doc.data(); return { id: doc.id, name: String(item.name), category: String(item.categoryName), min: Number(item.minQuantity), max: Number(item.maxQuantity), rateMinor: Number(serviceSellingRateNgnMinor(item)), refill: item.refillSupported === true, cancel: item.cancelSupported === true }; }).sort((a, b) => a.category.localeCompare(b.category) || a.name.localeCompare(b.name));
+  return <AppShell><span className="eyebrow">Order workspace</span><h1 className="page-heading">Create a new order</h1><p className="muted page-lead">Choose from the synchronized catalog, review service limits, and see the exact naira charge before submitting.</p><NewOrderForm services={services} selectedId={service} action={submitOrder} /></AppShell>;
+}

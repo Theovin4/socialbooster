@@ -49,7 +49,7 @@ export default async function AdminServices() {
                 <div>
                   <p className="eyebrow" style={{ margin: 0 }}>{provider.categoryName}</p>
                   <h2 style={{ fontSize: 18, margin: "8px 0" }}>{provider.name}</h2>
-                  <p className="muted" style={{ margin: 0 }}>ID {doc.id} · Provider rate ${provider.rateText}/1,000 · Min {provider.minQuantity} · Max {provider.maxQuantity} · Refill {provider.refillSupported ? "Yes" : "No"} · Cancel {provider.cancelSupported ? "Yes" : "No"}</p>
+                  <p className="muted" style={{ margin: 0 }}>ID {doc.id} · Provider rate NGN {provider.rateText}/1,000 · Min {provider.minQuantity} · Max {provider.maxQuantity} · Refill {provider.refillSupported ? "Yes" : "No"} · Cancel {provider.cancelSupported ? "Yes" : "No"}</p>
                 </div>
                 {local ? (
                   <div style={{ display: "grid", gap: 8, minWidth: 210 }}>

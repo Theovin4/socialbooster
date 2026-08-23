@@ -9,7 +9,7 @@ export async function POST(request:Request){
     if(Date.now()/1000-decoded.auth_time>300)return Response.json({error:"Recent sign-in required"},{status:401});
     const session=await adminAuth().createSessionCookie(idToken,{expiresIn:MAX_AGE*1000});
     (await cookies()).set(SESSION_COOKIE,session,{httpOnly:true,secure:process.env.NODE_ENV==="production",sameSite:"lax",path:"/",maxAge:MAX_AGE});
-    return Response.json({ok:true});
+    return Response.json({ok:true,admin:decoded.admin===true});
   }catch{return Response.json({error:"Authentication failed"},{status:401})}
 }
 export async function DELETE(){(await cookies()).set(SESSION_COOKIE,"",{httpOnly:true,secure:process.env.NODE_ENV==="production",sameSite:"lax",path:"/",maxAge:0});return Response.json({ok:true})}
