@@ -37,6 +37,7 @@ export async function createAndSubmitOrder(input: NewOrder) {
   if (("providerOrderId" in local && local.providerOrderId) || local.status !== "submitting") return { id: orderRef.id, status: local.status };
   try {
     const result = await new FollowsPanelClient().add(Number(local.providerServiceId), input.link, input.quantity);
+    console.info("[order-submit] provider accepted", { orderId: orderRef.id, providerOrderId: result.order, providerServiceId: local.providerServiceId, quantity: input.quantity });
     await orderRef.set({ providerOrderId: result.order, status: "pending", submittedAt: FieldValue.serverTimestamp(), updatedAt: FieldValue.serverTimestamp() }, { merge: true });
     await db.collection("orderEvents").add({ orderId: orderRef.id, userId: input.userId, status: "pending", createdAt: FieldValue.serverTimestamp() });
     return { id: orderRef.id, status: "pending" };
