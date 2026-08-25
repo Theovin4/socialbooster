@@ -19,5 +19,5 @@ export async function POST(request: Request) {
   batch.create(ref, { userId: user.uid, network: input.network, asset: quote.asset, address: CRYPTO_NETWORKS[input.network].address, requestedNgnMinor, expectedAssetAmount: quote.expectedAssetAmount, marketUsdNgn: quote.marketUsdNgn, appliedUsdNgn: quote.appliedUsdNgn, rateBufferNgn: quote.bufferNgn, feeBps: quote.feeBps, status: "awaiting_payment", quoteExpiresAt: expiresAt, createdAt: FieldValue.serverTimestamp(), updatedAt: FieldValue.serverTimestamp() });
   batch.set(rateRef, { createdAt: FieldValue.serverTimestamp() });
   await batch.commit();
-  return Response.json({ depositId: ref.id, network: input.network, label: CRYPTO_NETWORKS[input.network].label, asset: quote.asset, address: CRYPTO_NETWORKS[input.network].address, expectedAssetAmount: quote.expectedAssetAmount.toFixed(quote.asset === "BTC" ? 8 : 6), requestedNgnMinor, appliedUsdNgn: quote.appliedUsdNgn, marketUsdNgn: quote.marketUsdNgn, feeBps: quote.feeBps, expiresAt: expiresAt.toISOString() });
+  return Response.json({ depositId: ref.id, network: input.network, label: CRYPTO_NETWORKS[input.network].label, asset: quote.asset, address: CRYPTO_NETWORKS[input.network].address, expectedAssetAmount: quote.expectedAssetAmount.toFixed(quote.asset === "BTC" ? 8 : 6), requestedNgnMinor, expiresAt: expiresAt.toISOString() });
 }

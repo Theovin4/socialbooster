@@ -3,7 +3,7 @@
 import { useState } from "react";
 import { Toast } from "./toast";
 
-type Quote = { depositId: string; label: string; asset: string; address: string; expectedAssetAmount: string; requestedNgnMinor: number; appliedUsdNgn: number; marketUsdNgn: number; feeBps: number; expiresAt: string };
+type Quote = { depositId: string; label: string; asset: string; address: string; expectedAssetAmount: string; requestedNgnMinor: number; expiresAt: string };
 
 export function CryptoFunding() {
   const [quote, setQuote] = useState<Quote | null>(null), [busy, setBusy] = useState(false), [message, setMessage] = useState(""), [kind, setKind] = useState<"success" | "error" | "info">("info");
@@ -35,7 +35,7 @@ export function CryptoFunding() {
     </form> : <div className="notice" style={{ display: "grid", gap: 14 }}>
       <div><strong>{quote.label}</strong><p className="muted" style={{ marginBottom: 0 }}>Send exactly <strong style={{ color: "white" }}>{quote.expectedAssetAmount} {quote.asset}</strong> to receive NGN {(quote.requestedNgnMinor / 100).toLocaleString("en-NG")} after approval.</p></div>
       <label>Deposit address<input className="field" value={quote.address} readOnly onFocus={(event) => event.currentTarget.select()} /></label>
-      <div className="muted" style={{ fontSize: 14 }}>Rate used: NGN {quote.appliedUsdNgn.toLocaleString("en-NG")} per USD. The quote includes the {(quote.feeBps / 100).toFixed(0)}% crypto processing amount and expires at {new Date(quote.expiresAt).toLocaleTimeString("en-NG")}.</div>
+      <div className="muted" style={{ fontSize: 14 }}>This payment quote expires at {new Date(quote.expiresAt).toLocaleTimeString("en-NG")}.</div>
       <div style={{ color: "#fbbf24", fontWeight: 700 }}>Use only {quote.label}. Sending another token or network may permanently lose your funds.</div>
       <form action={submitHash} style={{ display: "grid", gap: 12 }}><label>Transaction hash / transaction ID<input className="field" name="txHash" autoComplete="off" minLength={32} required /></label><div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}><button className="btn primary" disabled={busy}>{busy ? "Checking blockchain…" : "I have paid — verify transaction"}</button><button className="btn" type="button" onClick={() => setQuote(null)} disabled={busy}>Cancel quote</button></div></form>
     </div>}
