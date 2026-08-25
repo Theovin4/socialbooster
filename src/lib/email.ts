@@ -10,7 +10,7 @@ export function brandedEmail(input: { title: string; preview: string; message: s
 export async function sendBrandedEmail(input: { to: string; subject: string; html: string }) {
   const key = process.env.RESEND_API_KEY, from = process.env.EMAIL_FROM;
   if (!key || !from) throw new Error("Branded email is not configured");
-  const response = await fetch("https://api.resend.com/emails", { method: "POST", headers: { authorization: `Bearer ${key}`, "content-type": "application/json" }, body: JSON.stringify({ from, to: [input.to], subject: input.subject, html: input.html }) });
+  const response = await fetch("https://api.resend.com/emails", { method: "POST", headers: { authorization: `Bearer ${key}`, "content-type": "application/json" }, body: JSON.stringify({ from, to: [input.to], reply_to: "support@inbound.socialbooster.net.ng", subject: input.subject, html: input.html }) });
   if (!response.ok) throw new Error(`Email delivery failed (${response.status})`);
 }
 
