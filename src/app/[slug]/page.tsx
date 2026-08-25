@@ -11,7 +11,7 @@ const business = {
   legalName: "Elysium Enterprise",
   registration: "Registered with the Corporate Affairs Commission; registration number available to competent authorities and verified counterparties upon lawful request.",
   address: "Mainland, Lagos, Nigeria",
-  supportEmail: "support@inbound.socialbooster.net.ng",
+  supportEmail: "support@socialbooster.net.ng",
   privacyEmail: "vincenttheoikechukwu@gmail.com",
 };
 
