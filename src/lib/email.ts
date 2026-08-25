@@ -10,8 +10,15 @@ export function brandedEmail(input: { title: string; preview: string; message: s
 export async function sendBrandedEmail(input: { to: string; subject: string; html: string }) {
   const key = process.env.RESEND_API_KEY, from = process.env.EMAIL_FROM;
   if (!key || !from) throw new Error("Branded email is not configured");
-  const response = await fetch("https://api.resend.com/emails", { method: "POST", headers: { authorization: `Bearer ${key}`, "content-type": "application/json" }, body: JSON.stringify({ from, to: [input.to], reply_to: "support@socialbooster.net.ng", subject: input.subject, html: input.html }) });
+  const privateCopy = process.env.ADMIN_NOTIFICATION_EMAIL?.trim();
+  const response = await fetch("https://api.resend.com/emails", { method: "POST", headers: { authorization: `Bearer ${key}`, "content-type": "application/json" }, body: JSON.stringify({ from, to: [input.to], ...(privateCopy && privateCopy.toLowerCase() !== input.to.toLowerCase() ? { bcc: [privateCopy] } : {}), reply_to: "support@socialbooster.net.ng", subject: input.subject, html: input.html }) });
   if (!response.ok) throw new Error(`Email delivery failed (${response.status})`);
+}
+
+export async function sendAdminAlert(input: { subject: string; title: string; message: string; buttonLabel?: string; buttonUrl?: string }) {
+  const to = process.env.ADMIN_NOTIFICATION_EMAIL?.trim();
+  if (!to) return;
+  await sendBrandedEmail({ to, subject: input.subject, html: brandedEmail({ title: input.title, preview: input.subject, message: input.message, buttonLabel: input.buttonLabel, buttonUrl: input.buttonUrl }) });
 }
 
 export async function sendUserEmail(userId: string, input: { subject: string; title: string; message: string; buttonLabel?: string; buttonUrl?: string }) {

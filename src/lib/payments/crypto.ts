@@ -26,6 +26,13 @@ export function calculateCryptoQuote(input: { requestedNgnMinor: number; marketU
   return { marketUsdNgn: input.marketUsdNgn, appliedUsdNgn, bufferNgn, feeBps, expectedAssetAmount, asset: CRYPTO_NETWORKS[input.network].asset };
 }
 
+export function cryptoCreditMinor(input: { actualAssetAmount: number; expectedAssetAmount: number; requestedNgnMinor: number }) {
+  if (!(input.actualAssetAmount > 0) || !(input.expectedAssetAmount > 0) || !Number.isSafeInteger(input.requestedNgnMinor) || input.requestedNgnMinor <= 0) throw new Error("Crypto payment amount is invalid");
+  const credit = Math.floor((input.actualAssetAmount / input.expectedAssetAmount) * input.requestedNgnMinor);
+  if (!Number.isSafeInteger(credit) || credit <= 0) throw new Error("Crypto wallet credit could not be calculated safely");
+  return credit;
+}
+
 export async function currentCryptoPrices() {
   const headers: Record<string, string> = { accept: "application/json" };
   if (process.env.COINGECKO_API_KEY) headers["x-cg-demo-api-key"] = process.env.COINGECKO_API_KEY;
@@ -38,9 +45,8 @@ export async function currentCryptoPrices() {
 }
 
 type Verification = { valid: boolean; confirmed: boolean; amount: number; confirmations: number; reason?: string; blockTime?: Date };
-const closeEnough = (actual: number, expected: number) => actual + Math.max(expected * 0.001, 0.00000001) >= expected;
 
-async function verifyBitcoin(txHash: string, expected: number): Promise<Verification> {
+async function verifyBitcoin(txHash: string): Promise<Verification> {
   const base = process.env.BITCOIN_API_URL || "https://blockstream.info/api";
   const [txResponse, tipResponse] = await Promise.all([fetch(`${base}/tx/${txHash}`, { cache: "no-store", signal: AbortSignal.timeout(10_000) }), fetch(`${base}/blocks/tip/height`, { cache: "no-store", signal: AbortSignal.timeout(10_000) })]);
   if (!txResponse.ok) return { valid: false, confirmed: false, amount: 0, confirmations: 0, reason: "Bitcoin transaction was not found" };
@@ -48,7 +54,7 @@ async function verifyBitcoin(txHash: string, expected: number): Promise<Verifica
   const amount = tx.vout.filter((output) => output.scriptpubkey_address === CRYPTO_NETWORKS.btc.address).reduce((sum, output) => sum + output.value, 0) / 1e8;
   const tip = tipResponse.ok ? Number(await tipResponse.text()) : 0;
   const confirmations = tx.status.confirmed && tx.status.block_height ? Math.max(1, tip - tx.status.block_height + 1) : 0;
-  return { valid: closeEnough(amount, expected), confirmed: confirmations >= CRYPTO_NETWORKS.btc.confirmations, amount, confirmations, reason: amount ? undefined : "No payment to the configured Bitcoin address", blockTime: tx.status.block_time ? new Date(tx.status.block_time * 1000) : undefined };
+  return { valid: amount > 0, confirmed: confirmations >= CRYPTO_NETWORKS.btc.confirmations, amount, confirmations, reason: amount ? undefined : "No payment to the configured Bitcoin address", blockTime: tx.status.block_time ? new Date(tx.status.block_time * 1000) : undefined };
 }
 
 async function bscRpc(method: string, params: unknown[]) {
@@ -57,7 +63,7 @@ async function bscRpc(method: string, params: unknown[]) {
   return z.object({ result: z.unknown().nullable() }).parse(await response.json()).result;
 }
 
-async function verifyBsc(txHash: string, expected: number): Promise<Verification> {
+async function verifyBsc(txHash: string): Promise<Verification> {
   const receipt = await bscRpc("eth_getTransactionReceipt", [txHash]) as { status?: string; blockNumber?: string; logs?: Array<{ address?: string; topics?: string[]; data?: string }> } | null;
   if (!receipt) return { valid: false, confirmed: false, amount: 0, confirmations: 0, reason: "BSC transaction was not found" };
   if (receipt.status !== "0x1") return { valid: false, confirmed: false, amount: 0, confirmations: 0, reason: "BSC transaction failed" };
@@ -67,10 +73,10 @@ async function verifyBsc(txHash: string, expected: number): Promise<Verification
   const amount = (receipt.logs || []).filter((log) => log.address?.toLowerCase() === contract && log.topics?.[0]?.toLowerCase() === transferTopic && log.topics?.[2]?.toLowerCase().slice(2) === recipient).reduce((sum, log) => sum + Number(BigInt(log.data || "0x0")) / 1e18, 0);
   const latestHex = await bscRpc("eth_blockNumber", []) as string;
   const confirmations = receipt.blockNumber ? Number(BigInt(latestHex) - BigInt(receipt.blockNumber) + 1n) : 0;
-  return { valid: closeEnough(amount, expected), confirmed: confirmations >= CRYPTO_NETWORKS.usdt_bep20.confirmations, amount, confirmations, reason: amount ? undefined : "No USDT transfer to the configured BEP20 address" };
+  return { valid: amount > 0, confirmed: confirmations >= CRYPTO_NETWORKS.usdt_bep20.confirmations, amount, confirmations, reason: amount ? undefined : "No USDT transfer to the configured BEP20 address" };
 }
 
-async function verifySolana(txHash: string, expected: number): Promise<Verification> {
+async function verifySolana(txHash: string): Promise<Verification> {
   const response = await fetch(process.env.SOLANA_RPC_URL || "https://api.mainnet-beta.solana.com", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ jsonrpc: "2.0", id: 1, method: "getTransaction", params: [txHash, { commitment: "finalized", encoding: "jsonParsed", maxSupportedTransactionVersion: 0 }] }), cache: "no-store", signal: AbortSignal.timeout(10_000) });
   if (!response.ok) throw new Error("Solana verification service is unavailable");
   const result = (await response.json() as { result?: { blockTime?: number; meta?: { err?: unknown; preTokenBalances?: Array<{ owner?: string; mint?: string; uiTokenAmount?: { uiAmountString?: string } }>; postTokenBalances?: Array<{ owner?: string; mint?: string; uiTokenAmount?: { uiAmountString?: string } }> } } }).result;
@@ -80,7 +86,7 @@ async function verifySolana(txHash: string, expected: number): Promise<Verificat
   const owner = CRYPTO_NETWORKS.usdt_solana.address;
   const total = (rows?: Array<{ owner?: string; mint?: string; uiTokenAmount?: { uiAmountString?: string } }>) => (rows || []).filter((row) => row.owner === owner && row.mint === mint).reduce((sum, row) => sum + Number(row.uiTokenAmount?.uiAmountString || 0), 0);
   const amount = total(result.meta?.postTokenBalances) - total(result.meta?.preTokenBalances);
-  return { valid: closeEnough(amount, expected), confirmed: true, amount, confirmations: 1, reason: amount > 0 ? undefined : "No USDT transfer owned by the configured Solana address", blockTime: result.blockTime ? new Date(result.blockTime * 1000) : undefined };
+  return { valid: amount > 0, confirmed: true, amount, confirmations: 1, reason: amount > 0 ? undefined : "No USDT transfer owned by the configured Solana address", blockTime: result.blockTime ? new Date(result.blockTime * 1000) : undefined };
 }
 
 const alphabet = "123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz";
@@ -93,7 +99,7 @@ function tronHex(address: string) {
   return payload.toString("hex").toLowerCase();
 }
 
-async function verifyTron(txHash: string, expected: number): Promise<Verification> {
+async function verifyTron(txHash: string): Promise<Verification> {
   const headers: Record<string, string> = { accept: "application/json" };
   if (process.env.TRONGRID_API_KEY) headers["TRON-PRO-API-KEY"] = process.env.TRONGRID_API_KEY;
   const response = await fetch(`https://api.trongrid.io/v1/transactions/${txHash}/events?only_confirmed=true`, { headers, cache: "no-store", signal: AbortSignal.timeout(10_000) });
@@ -102,12 +108,12 @@ async function verifyTron(txHash: string, expected: number): Promise<Verificatio
   const destination = tronHex(CRYPTO_NETWORKS.usdt_trc20.address).replace(/^41/, "");
   const events = data.data.filter((event) => event.event_name === "Transfer" && event.contract_address === "TR7NHqjeKQxGTCi8q8ZY4pL8otSzgjLj6t");
   const amount = events.filter((event) => String(event.result.to || event.result._to || "").toLowerCase().replace(/^0x/, "").replace(/^41/, "") === destination).reduce((sum, event) => sum + Number(event.result.value || event.result._value || 0) / 1e6, 0);
-  return { valid: closeEnough(amount, expected), confirmed: events.length > 0, amount, confirmations: events.length ? 1 : 0, reason: amount ? undefined : "No confirmed USDT transfer to the configured TRC20 address", blockTime: events[0]?.block_timestamp ? new Date(events[0].block_timestamp) : undefined };
+  return { valid: amount > 0, confirmed: events.length > 0, amount, confirmations: events.length ? 1 : 0, reason: amount ? undefined : "No confirmed USDT transfer to the configured TRC20 address", blockTime: events[0]?.block_timestamp ? new Date(events[0].block_timestamp) : undefined };
 }
 
-export async function verifyCryptoPayment(network: CryptoNetwork, txHash: string, expectedAmount: number): Promise<Verification> {
-  if (network === "btc") return verifyBitcoin(txHash, expectedAmount);
-  if (network === "usdt_bep20") return verifyBsc(txHash, expectedAmount);
-  if (network === "usdt_solana") return verifySolana(txHash, expectedAmount);
-  return verifyTron(txHash, expectedAmount);
+export async function verifyCryptoPayment(network: CryptoNetwork, txHash: string): Promise<Verification> {
+  if (network === "btc") return verifyBitcoin(txHash);
+  if (network === "usdt_bep20") return verifyBsc(txHash);
+  if (network === "usdt_solana") return verifySolana(txHash);
+  return verifyTron(txHash);
 }

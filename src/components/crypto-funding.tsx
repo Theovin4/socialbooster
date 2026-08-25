@@ -12,7 +12,7 @@ export function CryptoFunding() {
     try {
       const response = await fetch("/api/payments/crypto/quote", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ amountNgn: form.get("amountNgn"), network: form.get("network") }) }), data = await response.json();
       if (!response.ok) throw new Error(data.error || "A crypto quote could not be created");
-      setQuote(data); setKind("info"); setMessage("Your 15-minute payment quote is ready. Send the exact amount on the selected network only.");
+      setQuote(data); setKind("info"); setMessage("Your 18-minute payment quote is ready. Send payment on the selected network and submit the transaction hash before it expires.");
     } catch (error) { setKind("error"); setMessage(error instanceof Error ? error.message : "A crypto quote could not be created"); }
     finally { setBusy(false); }
   }

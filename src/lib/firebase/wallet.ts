@@ -1,6 +1,7 @@
 import { FieldValue } from "firebase-admin/firestore";
 import { adminDb } from "./admin";
 import { configuredUsdToNgnRateMicros, convertMinor } from "../currency";
+import { sendAdminAlert } from "../email";
 
 export type LedgerType = "deposit" | "order_debit" | "refund" | "admin_adjustment" | "promotional_credit" | "currency_conversion";
 export type WalletEntry = { userId: string; type: LedgerType; deltaMinor: number; currency: string; idempotencyKey: string; reference?: string; reason?: string; actorUid?: string };
@@ -32,7 +33,7 @@ export async function ensureWallet(userId: string, currency = "NGN") {
 export async function postWallet(input: WalletEntry) {
   validateWalletEntry(input);
   const db = adminDb(), walletRef = db.collection("wallets").doc(input.userId), transactionRef = db.collection("walletTransactions").doc(input.idempotencyKey), ledgerRef = db.collection("walletLedger").doc(input.idempotencyKey), auditRef = db.collection("auditLogs").doc(`wallet:${input.idempotencyKey}`);
-  return db.runTransaction(async (transaction) => {
+  const result = await db.runTransaction(async (transaction) => {
     const [existing, wallet] = await Promise.all([transaction.get(transactionRef), transaction.get(walletRef)]);
     if (existing.exists) return { transactionId: transactionRef.id, duplicate: true };
     const current = wallet.exists ? Number(wallet.get("availableMinor") ?? wallet.get("balanceMinor") ?? 0) : 0;
@@ -51,6 +52,8 @@ export async function postWallet(input: WalletEntry) {
     if (input.type === "admin_adjustment") transaction.create(auditRef, { action: "wallet_admin_adjustment", targetType: "wallet", targetId: input.userId, transactionId: transactionRef.id, deltaMinor: input.deltaMinor, currency, reason: input.reason, actorUid: input.actorUid, createdAt: FieldValue.serverTimestamp() });
     return { transactionId: transactionRef.id, duplicate: false };
   });
+  if (!result.duplicate && input.deltaMinor > 0) await sendAdminAlert({ subject: `Wallet credit: ${input.currency} ${(input.deltaMinor / 100).toLocaleString("en-NG", { minimumFractionDigits: 2 })}`, title: "Customer wallet credited", message: `A ${input.type.replaceAll("_", " ")} of ${input.currency} ${(input.deltaMinor / 100).toLocaleString("en-NG", { minimumFractionDigits: 2 })} was posted for customer ${input.userId}. Reference: ${input.reference || result.transactionId}.`, buttonLabel: "View transactions", buttonUrl: `${process.env.NEXT_PUBLIC_APP_URL || "https://www.socialbooster.net.ng"}/admin/transactions` }).catch((error) => console.warn("[admin-credit-email] delivery failed", { transactionId: result.transactionId, error: error instanceof Error ? error.message : "Unknown error" }));
+  return result;
 }
 
 export async function migrateLegacyUsdWalletToNgn(userId: string) {

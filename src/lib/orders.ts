@@ -5,6 +5,7 @@ import { postWallet } from "./firebase/wallet";
 import { serviceCostMinor } from "./money";
 import { serviceSellingRateNgnMinor } from "./currency";
 import { FollowsPanelClient, ProviderError } from "./providers/followspanel";
+import { sendAdminAlert, sendUserEmail } from "./email";
 
 export type NewOrder = { userId: string; serviceId: string; link: string; quantity: number; idempotencyKey: string };
 export async function createAndSubmitOrder(input: NewOrder) {
@@ -40,6 +41,8 @@ export async function createAndSubmitOrder(input: NewOrder) {
     console.info("[order-submit] provider accepted", { orderId: orderRef.id, providerOrderId: result.order, providerServiceId: local.providerServiceId, quantity: input.quantity });
     await orderRef.set({ providerOrderId: result.order, status: "pending", submittedAt: FieldValue.serverTimestamp(), updatedAt: FieldValue.serverTimestamp() }, { merge: true });
     await db.collection("orderEvents").add({ orderId: orderRef.id, userId: input.userId, status: "pending", createdAt: FieldValue.serverTimestamp() });
+    await sendAdminAlert({ subject: `New order #${orderRef.id.slice(0, 8)}`, title: "New customer order", message: `${String(local.serviceName)} · Quantity ${input.quantity.toLocaleString("en-NG")} · Charge NGN ${(Number(local.customerPriceMinor) / 100).toLocaleString("en-NG", { minimumFractionDigits: 2 })} · Followpanel order ${result.order}.`, buttonLabel: "Review live order", buttonUrl: `${process.env.NEXT_PUBLIC_APP_URL || "https://www.socialbooster.net.ng"}/admin/provider` }).catch((error) => console.warn("[admin-order-email] delivery failed", { orderId: orderRef.id, error: error instanceof Error ? error.message : "Unknown error" }));
+    await sendUserEmail(input.userId, { subject: `Order #${orderRef.id.slice(0, 8)} received`, title: "Your order is now processing", message: `We received your ${String(local.serviceName)} order for ${input.quantity.toLocaleString("en-NG")}. You will receive branded updates as delivery progresses.`, buttonLabel: "Track order", buttonUrl: `${process.env.NEXT_PUBLIC_APP_URL || "https://www.socialbooster.net.ng"}/dashboard/orders/${orderRef.id}` }).catch((error) => console.warn("[order-confirmation-email] delivery failed", { orderId: orderRef.id, error: error instanceof Error ? error.message : "Unknown error" }));
     return { id: orderRef.id, status: "pending" };
   } catch (error) {
     const definitelyRejected = error instanceof ProviderError && ["NOT_CONFIGURED", "UPSTREAM_REJECTED"].includes(error.code);
