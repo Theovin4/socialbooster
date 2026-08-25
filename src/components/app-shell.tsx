@@ -25,7 +25,7 @@ const adminLinks = [
   { label: "Finance", href: "/admin/finance", icon: ChartNoAxesCombined },
   { label: "Crypto payments", href: "/admin/crypto", icon: Bitcoin },
   { label: "Support", href: "/admin/support", icon: Headphones },
-  { label: "Provider health", href: "/admin/provider", icon: Activity },
+  { label: "Live orders & API", href: "/admin/provider", icon: Activity },
 ];
 
 export function AppShell({ admin = false, children }: { admin?: boolean; children: React.ReactNode }) {

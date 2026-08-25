@@ -67,7 +67,11 @@ export class FollowsPanelClient {
   balance() { return this.post("balance").then((data) => z.object({ balance: z.string(), currency: z.string() }).parse(data)); }
   add(serviceId: number, link: string, quantity: number) { return this.post("add", { service: String(serviceId), link, quantity: String(quantity) }, false).then((data) => z.object({ order: z.coerce.number().int().positive() }).parse(data)); }
   status(orderId: number) { return this.post("status", { order: String(orderId) }).then((data) => statusSchema.parse(data)); }
-  statuses(ids: number[]) { return this.post("status", { orders: ids.join(",") }).then((data) => z.record(z.string(), statusSchema).parse(data)); }
+  statuses(ids: number[]) { return this.post("status", { orders: ids.join(",") }).then((data) => {
+    const source = z.record(z.string(), z.unknown()).parse(data), valid: Record<string, z.infer<typeof statusSchema>> = {};
+    for (const [id, value] of Object.entries(source)) { const parsed = statusSchema.safeParse(value); if (parsed.success) valid[id] = parsed.data; }
+    return valid;
+  }); }
   refill(orderId: number) { return this.post("refill", { order: String(orderId) }, false).then((data) => refillSchema.parse(data)); }
   refills(orderIds: number[]) { return this.post("refill", { orders: orderIds.join(",") }, false).then((data) => multipleRefillSchema.parse(data)); }
   refillStatus(refillId: number) { return this.post("refill_status", { refill: String(refillId) }).then((data) => refillStatusSchema.parse(data)); }

@@ -7,6 +7,11 @@ import { adminDb } from "@/lib/firebase/admin";
 import { postWallet } from "@/lib/firebase/wallet";
 import { requireAdmin } from "@/lib/firebase/session";
 
+export async function refreshLiveOrders() {
+  await requireAdmin();
+  revalidatePath("/admin/provider");
+}
+
 export async function refundOrder(formData: FormData) {
   const admin = await requireAdmin();
   const orderId = z.string().uuid().parse(formData.get("orderId"));

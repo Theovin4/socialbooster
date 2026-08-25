@@ -21,4 +21,10 @@ describe("FollowsPanelClient", () => {
     vi.stubGlobal("fetch", vi.fn().mockResolvedValue(new Response(JSON.stringify([{ service: 1, name: "Bad", type: "Default", rate: "free", min: 10, max: 1, category: "Video", refill: false, cancel: false }]), { status: 200 })));
     await expect(new FollowsPanelClient("https://provider.test", "secret").services()).rejects.toThrow();
   });
+
+  it("keeps valid live order statuses when another order is unavailable", async () => {
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(new Response(JSON.stringify({ "101": { status: "In progress", start_count: "517", remains: "120" }, "102": { error: "Incorrect order ID" } }), { status: 200 })));
+    const statuses = await new FollowsPanelClient("https://provider.test", "secret").statuses([101, 102]);
+    expect(statuses).toEqual({ "101": { status: "In progress", start_count: "517", remains: "120" } });
+  });
 });

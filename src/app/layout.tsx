@@ -1,7 +1,7 @@
 import type { Metadata, Viewport } from "next";
 import "./globals.css";
 
-const siteUrl = process.env.NEXT_PUBLIC_APP_URL || "https://socialbooster-sigma.vercel.app";
+const siteUrl = process.env.NEXT_PUBLIC_APP_URL || "https://www.socialbooster.net.ng";
 export const metadata: Metadata = {
   metadataBase: new URL(siteUrl),
   title: { default: "Social Booster Nigeria | Social Media Marketing Services", template: "%s | Social Booster Nigeria" },
@@ -9,7 +9,7 @@ export const metadata: Metadata = {
   applicationName: "Social Booster Nigeria",
   icons: { icon: [{ url: "/favicon.ico", sizes: "any" }, { url: "/icon.svg", type: "image/svg+xml" }], shortcut: "/favicon.ico", apple: "/apple-icon.png" },
   keywords: ["social media marketing services Nigeria", "social media services Africa", "Instagram marketing Nigeria", "TikTok promotion Africa", "YouTube promotion Nigeria", "social media reseller panel Africa"],
-  alternates: { languages: { "en-NG": "/" } },
+  alternates: { canonical: "/", languages: { "en-NG": "/" } },
   openGraph: { type: "website", locale: "en_NG", url: siteUrl, siteName: "Social Booster", title: "Social Booster | Social Media Services for Nigeria and Africa", description: "Compare social media marketing services, pay securely and track every order from one dashboard." },
   twitter: { card: "summary_large_image", title: "Social Booster Nigeria", description: "Social media marketing services with transparent NGN pricing." },
   robots: { index: true, follow: true, googleBot: { index: true, follow: true, "max-image-preview": "large", "max-snippet": -1, "max-video-preview": -1 } },
