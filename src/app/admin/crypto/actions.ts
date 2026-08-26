@@ -30,7 +30,7 @@ export async function decideCryptoDeposit(formData: FormData) {
       const verification = await verifyCryptoPayment(snapshot.get("network") as CryptoNetwork, txHash);
       if (!verification.valid || !verification.confirmed) throw new Error(verification.reason || "The payment is not sufficiently confirmed on-chain");
       const quoteExpiry = snapshot.get("quoteExpiresAt")?.toMillis?.() || 0;
-      if (verification.blockTime && verification.blockTime.getTime() > quoteExpiry + 5 * 60_000) throw new Error("The payment was made after the quoted rate expired");
+      if (verification.blockTime && verification.blockTime.getTime() > quoteExpiry) throw new Error("The payment was made after the quoted rate expired");
       const requestedNgnMinor = Number(snapshot.get("requestedNgnMinor"));
       const creditedNgnMinor = cryptoCreditMinor({ actualAssetAmount: verification.amount, expectedAssetAmount, requestedNgnMinor });
       const posted = await postWallet({ userId: String(snapshot.get("userId")), type: "deposit", deltaMinor: creditedNgnMinor, currency: "NGN", idempotencyKey: `crypto:${String(snapshot.get("network"))}:${txHash}`, reference: ref.id });

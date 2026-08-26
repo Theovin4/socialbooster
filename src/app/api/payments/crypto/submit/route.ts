@@ -17,7 +17,7 @@ export async function POST(request: Request) {
   await ref.set({ txHash: input.txHash, status: "verifying", submittedAt: FieldValue.serverTimestamp(), updatedAt: FieldValue.serverTimestamp() }, { merge: true });
   try {
     const verification = await verifyCryptoPayment(snapshot.get("network") as CryptoNetwork, input.txHash);
-    const onTime = !verification.blockTime || verification.blockTime.getTime() <= expiresAt + 5 * 60_000;
+    const onTime = !verification.blockTime || verification.blockTime.getTime() <= expiresAt;
     const status = verification.valid && verification.confirmed && onTime ? "verified_pending_approval" : verification.valid && onTime ? "confirming" : "verification_failed";
     if (!onTime) verification.reason = "The on-chain payment was made after this quote expired";
     await ref.set({ status, verifiedAmount: verification.amount, confirmations: verification.confirmations, verificationReason: verification.reason || null, blockTime: verification.blockTime || null, lastVerifiedAt: FieldValue.serverTimestamp(), updatedAt: FieldValue.serverTimestamp() }, { merge: true });
