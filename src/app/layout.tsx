@@ -2,7 +2,7 @@ import type { Metadata, Viewport } from "next";
 import { ConsentManager } from "@/components/consent-manager";
 import "./globals.css";
 
-const siteUrl = process.env.NEXT_PUBLIC_APP_URL || "https://www.socialbooster.net.ng";
+const siteUrl = "https://www.socialbooster.net.ng";
 export const metadata: Metadata = {
   metadataBase: new URL(siteUrl),
   title: { default: "Social Booster Nigeria | Social Media Marketing Services", template: "%s | Social Booster Nigeria" },
@@ -10,7 +10,7 @@ export const metadata: Metadata = {
   applicationName: "Social Booster Nigeria",
   icons: { icon: [{ url: "/favicon.ico", sizes: "any" }, { url: "/icon.svg", type: "image/svg+xml" }], shortcut: "/favicon.ico", apple: "/apple-icon.png" },
   keywords: ["social media marketing services Nigeria", "social media services Africa", "Instagram marketing Nigeria", "TikTok promotion Africa", "YouTube promotion Nigeria", "social media reseller panel Africa"],
-  alternates: { canonical: "/", languages: { "en-NG": "/" } },
+  alternates: { canonical: "/", languages: { "en-NG": "/", "x-default": "/" } },
   openGraph: { type: "website", locale: "en_NG", url: siteUrl, siteName: "Social Booster", title: "Social Booster | Social Media Services for Nigeria and Africa", description: "Compare social media marketing services, pay securely and track every order from one dashboard." },
   twitter: { card: "summary_large_image", title: "Social Booster Nigeria", description: "Social media marketing services with transparent NGN pricing." },
   robots: { index: true, follow: true, googleBot: { index: true, follow: true, "max-image-preview": "large", "max-snippet": -1, "max-video-preview": -1 } },
@@ -22,7 +22,7 @@ export const viewport: Viewport = { width: "device-width", initialScale: 1, them
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {
   const structuredData = { "@context": "https://schema.org", "@graph": [
-    { "@type": "Organization", "@id": `${siteUrl}/#organization`, name: "Social Booster", url: siteUrl, logo: `${siteUrl}/icon-512.png`, areaServed: [{ "@type": "Country", name: "Nigeria" }, { "@type": "Continent", name: "Africa" }] },
+    { "@type": "Organization", "@id": `${siteUrl}/#organization`, name: "Social Booster", legalName: "Elysium Enterprise", url: siteUrl, logo: `${siteUrl}/icon-512.png`, email: "support@socialbooster.net.ng", address: { "@type": "PostalAddress", addressLocality: "Lagos", addressCountry: "NG" }, contactPoint: { "@type": "ContactPoint", contactType: "customer support", email: "support@socialbooster.net.ng", availableLanguage: "English", areaServed: "Africa" }, areaServed: [{ "@type": "Country", name: "Nigeria" }, { "@type": "Continent", name: "Africa" }] },
     { "@type": "WebSite", "@id": `${siteUrl}/#website`, url: siteUrl, name: "Social Booster Nigeria", inLanguage: "en-NG", publisher: { "@id": `${siteUrl}/#organization` }, potentialAction: { "@type": "SearchAction", target: `${siteUrl}/services?q={search_term_string}`, "query-input": "required name=search_term_string" } },
   ] };
   return <html lang="en-NG"><body><script type="application/ld+json" dangerouslySetInnerHTML={{ __html: JSON.stringify(structuredData).replace(/</g, "\\u003c") }} /><ConsentManager />{children}</body></html>;
