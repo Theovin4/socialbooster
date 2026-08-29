@@ -115,6 +115,14 @@ export default async function SupportPage({
                   </span>
                 </div>
                 <p>{item.get("subject")}</p>
+                {item.get("lastReply") ? (
+                  <div className="notice" style={{ margin: "10px 0" }}>
+                    <strong>Support reply</strong>
+                    <p style={{ whiteSpace: "pre-wrap", marginBottom: 0 }}>
+                      {String(item.get("lastReply"))}
+                    </p>
+                  </div>
+                ) : null}
                 {item.get("orderId") ? (
                   <Link
                     className="muted"

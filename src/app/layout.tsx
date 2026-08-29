@@ -1,6 +1,5 @@
 import type { Metadata, Viewport } from "next";
-import { GoogleAnalytics } from "@next/third-parties/google";
-import { AdSenseAutoAds } from "@/components/adsense-auto-ads";
+import { ConsentManager } from "@/components/consent-manager";
 import "./globals.css";
 
 const siteUrl = process.env.NEXT_PUBLIC_APP_URL || "https://www.socialbooster.net.ng";
@@ -26,5 +25,5 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
     { "@type": "Organization", "@id": `${siteUrl}/#organization`, name: "Social Booster", url: siteUrl, logo: `${siteUrl}/icon-512.png`, areaServed: [{ "@type": "Country", name: "Nigeria" }, { "@type": "Continent", name: "Africa" }] },
     { "@type": "WebSite", "@id": `${siteUrl}/#website`, url: siteUrl, name: "Social Booster Nigeria", inLanguage: "en-NG", publisher: { "@id": `${siteUrl}/#organization` }, potentialAction: { "@type": "SearchAction", target: `${siteUrl}/services?q={search_term_string}`, "query-input": "required name=search_term_string" } },
   ] };
-  return <html lang="en-NG"><body><script type="application/ld+json" dangerouslySetInnerHTML={{ __html: JSON.stringify(structuredData).replace(/</g, "\\u003c") }} /><AdSenseAutoAds />{children}</body><GoogleAnalytics gaId="G-NEZPXRW3M4" /></html>;
+  return <html lang="en-NG"><body><script type="application/ld+json" dangerouslySetInnerHTML={{ __html: JSON.stringify(structuredData).replace(/</g, "\\u003c") }} /><ConsentManager />{children}</body></html>;
 }

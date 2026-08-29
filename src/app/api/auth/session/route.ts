@@ -4,7 +4,7 @@ function trustedOrigin(origin:string|null){if(!origin)return false;try{const url
 export async function POST(request:Request){
   if(!trustedOrigin((await headers()).get("origin")))return Response.json({error:"Invalid origin"},{status:403});
   try{
-    const{idToken}=bodySchema.parse(await request.json()),decoded=await adminAuth().verifyIdToken(idToken);
+    const{idToken}=bodySchema.parse(await request.json()),decoded=await adminAuth().verifyIdToken(idToken,true);
     if(!decoded.email_verified)return Response.json({error:"Email verification required"},{status:403});
     if(Date.now()/1000-decoded.auth_time>300)return Response.json({error:"Recent sign-in required"},{status:401});
     const session=await adminAuth().createSessionCookie(idToken,{expiresIn:MAX_AGE*1000});

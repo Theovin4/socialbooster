@@ -27,4 +27,16 @@ describe("FollowsPanelClient", () => {
     const statuses = await new FollowsPanelClient("https://provider.test", "secret").statuses([101, 102]);
     expect(statuses).toEqual({ "101": { status: "In progress", start_count: "517", remains: "120" } });
   });
+
+  it("recognizes an accepted cancellation response", async () => {
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(new Response(JSON.stringify([{ order: 101, cancel: true }]), { status: 200 })));
+    const result = await new FollowsPanelClient("https://provider.test", "secret").cancel([101]);
+    expect(result).toEqual([{ order: 101, accepted: true }]);
+  });
+
+  it("preserves a provider cancellation rejection", async () => {
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(new Response(JSON.stringify({ "101": { order: 101, error: "Cancellation is not available" } }), { status: 200 })));
+    const result = await new FollowsPanelClient("https://provider.test", "secret").cancel([101]);
+    expect(result).toEqual([{ order: 101, accepted: false, error: "Cancellation is not available" }]);
+  });
 });

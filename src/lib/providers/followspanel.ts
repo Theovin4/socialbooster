@@ -76,5 +76,11 @@ export class FollowsPanelClient {
   refills(orderIds: number[]) { return this.post("refill", { orders: orderIds.join(",") }, false).then((data) => multipleRefillSchema.parse(data)); }
   refillStatus(refillId: number) { return this.post("refill_status", { refill: String(refillId) }).then((data) => refillStatusSchema.parse(data)); }
   refillStatuses(ids: number[]) { return this.post("refill_status", { refills: ids.join(",") }).then((data) => z.record(z.string(), refillStatusSchema).parse(data)); }
-  cancel(ids: number[]) { return this.post("cancel", { orders: ids.join(",") }, false).then((data) => z.array(z.record(z.string(), z.unknown())).parse(data)); }
+  cancel(ids: number[]) { return this.post("cancel", { orders: ids.join(",") }, false).then((data) => {
+    const rows = Array.isArray(data) ? data : data && typeof data === "object" ? Object.values(data) : [];
+    return rows.map((row, index) => {
+      const value = z.object({ order: z.coerce.number().int().positive().optional(), cancel: z.union([z.boolean(), z.coerce.number().int().min(0).transform(Boolean)]).optional(), error: z.string().optional() }).passthrough().parse(row);
+      return { order: value.order || ids[index], accepted: value.cancel === true && !value.error, error: value.error };
+    });
+  }); }
 }

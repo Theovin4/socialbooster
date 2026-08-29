@@ -6,6 +6,7 @@ import { z } from "zod";
 import { adminDb } from "@/lib/firebase/admin";
 import { postWallet } from "@/lib/firebase/wallet";
 import { requireAdmin } from "@/lib/firebase/session";
+import { FollowsPanelClient } from "@/lib/providers/followspanel";
 
 export async function refreshLiveOrders() {
   await requireAdmin();
@@ -31,4 +32,13 @@ export async function refundOrder(formData: FormData) {
   revalidatePath("/dashboard/orders");
   revalidatePath("/dashboard/wallet");
   revalidatePath("/dashboard/transactions");
+}
+
+export async function retryCancellation(formData: FormData) {
+  const admin = await requireAdmin(), orderId = z.string().uuid().parse(formData.get("orderId")), db = adminDb(), ref = db.collection("orders").doc(orderId), order = await ref.get();
+  if (!order.exists || !Number.isInteger(order.get("providerOrderId")) || order.get("cancellationStatus") !== "provider_confirmation_required") throw new Error("Cancellation is not awaiting verification");
+  const [result] = await new FollowsPanelClient().cancel([Number(order.get("providerOrderId"))]);
+  await ref.set({ cancellationStatus: result?.accepted ? "submitted" : result?.error ? "rejected" : "provider_confirmation_required", cancellationReason: result?.error || null, cancellationRetriedAt: FieldValue.serverTimestamp(), cancellationRetriedBy: admin.uid, updatedAt: FieldValue.serverTimestamp() }, { merge: true });
+  await db.collection("auditLogs").add({ action: "order_cancellation_retried", targetType: "order", targetId: orderId, providerOrderId: order.get("providerOrderId"), accepted: result?.accepted || false, error: result?.error || null, actorUid: admin.uid, createdAt: FieldValue.serverTimestamp() });
+  revalidatePath("/admin/provider"); revalidatePath(`/dashboard/orders/${orderId}`);
 }

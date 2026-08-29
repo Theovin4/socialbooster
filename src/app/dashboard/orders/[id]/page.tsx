@@ -88,6 +88,14 @@ export default async function OrderPage({
           title="Order submitted"
           message="Your order was created successfully. Progress will appear as soon as processing begins."
         />
+      ) : notice === "cancellation-pending" ? (
+        <Toast kind="success" title="Cancellation request submitted" message="The request was sent for processing. The order remains active until its live status confirms cancellation." />
+      ) : notice === "cancellation-review" ? (
+        <Toast kind="info" title="Cancellation is being reviewed" message="We saved your request but could not obtain an immediate confirmation. Support has been alerted to verify it." />
+      ) : notice === "cancellation-rejected" ? (
+        <Toast kind="error" title="Cancellation was not accepted" message="The order remains active. Open a delivery-support ticket if you need further assistance." />
+      ) : notice === "cancellation-unavailable" ? (
+        <Toast kind="info" title="Cancellation is not available" message="This order is no longer eligible for automated cancellation. You can report a delivery issue for review." />
       ) : refreshFailed ? (
         <Toast
           kind="info"
@@ -186,6 +194,7 @@ export default async function OrderPage({
             Report delivery issue
           </Link>
         </div>
+        {order.cancellationStatus ? <p className="muted" style={{ marginTop: 16 }}>Cancellation status: <strong style={{ textTransform: "capitalize" }}>{String(order.cancellationStatus).replaceAll("_", " ")}</strong>. A request is complete only when the live order status becomes cancelled.</p> : null}
       </div>
     </AppShell>
   );
