@@ -2,26 +2,42 @@ import Link from "next/link";
 import { AppShell } from "@/components/app-shell";
 import { adminDb } from "@/lib/firebase/admin";
 import { requireAdmin } from "@/lib/firebase/session";
-import { replyToDashboardTicket, replyToInboundEmail } from "./actions";
 
 export const dynamic = "force-dynamic";
 
-export default async function AdminSupportPage() {
+function adminState(status: string, lastSender: string, inbound: boolean) {
+  if (status === "closed") return "Closed";
+  if (inbound && status === "replied") return "Replied";
+  if (lastSender === "admin" || status === "replied") return "Waiting for customer";
+  return "Needs response";
+}
+
+export default async function AdminSupportPage({ searchParams }: { searchParams: Promise<{ view?: string; source?: string }> }) {
   await requireAdmin();
-  const snapshot = await adminDb().collection("supportTickets").limit(100).get();
-  const tickets = snapshot.docs.sort((a, b) => (b.get("createdAt")?.toMillis?.() || 0) - (a.get("createdAt")?.toMillis?.() || 0));
+  const { view = "open", source = "all" } = await searchParams;
+  const snapshot = await adminDb().collection("supportTickets").limit(200).get();
+  const all = snapshot.docs.sort((a, b) => (b.get("updatedAt")?.toMillis?.() || b.get("createdAt")?.toMillis?.() || 0) - (a.get("updatedAt")?.toMillis?.() || a.get("createdAt")?.toMillis?.() || 0));
+  const openCount = all.filter((item) => item.get("status") !== "closed").length;
+  const needsResponse = all.filter((item) => item.get("status") !== "closed" && item.get("lastSender") !== "admin" && item.get("status") !== "replied").length;
+  const closedCount = all.length - openCount;
+  const tickets = all.filter((item) => {
+    const statusMatch = view === "all" ? true : view === "closed" ? item.get("status") === "closed" : view === "needs-response" ? item.get("status") !== "closed" && item.get("lastSender") !== "admin" && item.get("status") !== "replied" : item.get("status") !== "closed";
+    const sourceMatch = source === "all" ? true : source === "email" ? item.get("source") === "inbound_email" : item.get("source") !== "inbound_email";
+    return statusMatch && sourceMatch;
+  });
   return <AppShell admin>
     <span className="eyebrow">Customer care</span><h1 className="page-heading">Support inbox</h1>
-    <p className="muted page-lead">Dashboard tickets and verified inbound messages sent to support@socialbooster.net.ng appear here. Target response time: within 24 hours.</p>
-    <div style={{ display: "grid", gap: 16 }}>{tickets.map((item) => {
-      const inbound = item.get("source") === "inbound_email", orderId = String(item.get("orderId") || "");
-      return <article className="glass card" key={item.id}>
-        <div className="section-head"><div><span className="eyebrow">{inbound ? "Inbound email" : item.get("priority") === "high" ? "Priority delivery issue" : "Dashboard ticket"}</span><h2 style={{ margin: "6px 0" }}>{item.get("subject")}</h2><p className="muted" style={{ margin: 0 }}>{inbound ? `From ${item.get("fromEmail")}` : orderId ? `Order #${orderId.slice(0, 8)}` : `Ticket #${item.id.slice(0, 8)}`}</p></div><span className="status-pill">{String(item.get("status") || "open")}</span></div>
-        <p style={{ whiteSpace: "pre-wrap", lineHeight: 1.7 }}>{String(item.get("message") || "No message supplied")}</p>
-        {orderId ? <p><Link className="btn" href="/admin/provider">Open live-order verification</Link></p> : null}
-        {Array.isArray(item.get("attachments")) && item.get("attachments").length ? <p className="muted">Attachments: {item.get("attachments").map((attachment: { filename?: string }) => attachment.filename || "attachment").join(", ")}</p> : null}
-        <form action={inbound ? replyToInboundEmail : replyToDashboardTicket} style={{ display: "grid", gap: 12, marginTop: 18 }}><input type="hidden" name="ticketId" value={item.id} /><label>Reply<textarea className="field" name="message" minLength={10} maxLength={5000} rows={5} required placeholder="Write a clear support response…" /></label><button className="btn primary" type="submit">Send branded reply</button></form>
-      </article>;
-    })}{tickets.length === 0 ? <div className="glass card"><h2>No support messages</h2><p className="muted">New dashboard tickets and inbound emails will appear here.</p></div> : null}</div>
+    <p className="muted page-lead">Dashboard conversations and messages received at support@socialbooster.net.ng, organised in one private inbox.</p>
+    <div className="grid3" style={{ margin: "28px 0" }}><div className="glass card"><p className="muted">Needs response</p><strong style={{ fontSize: 34 }}>{needsResponse}</strong></div><div className="glass card"><p className="muted">Open</p><strong style={{ fontSize: 34 }}>{openCount}</strong></div><div className="glass card"><p className="muted">Closed</p><strong style={{ fontSize: 34 }}>{closedCount}</strong></div></div>
+    <div className="glass card support-admin-toolbar"><div className="support-filters"><Link className={`btn${view === "needs-response" ? " primary" : ""}`} href={`/admin/support?view=needs-response&source=${source}`}>Needs response</Link><Link className={`btn${view === "open" ? " primary" : ""}`} href={`/admin/support?view=open&source=${source}`}>Open</Link><Link className={`btn${view === "closed" ? " primary" : ""}`} href={`/admin/support?view=closed&source=${source}`}>Closed</Link><Link className={`btn${view === "all" ? " primary" : ""}`} href={`/admin/support?view=all&source=${source}`}>All</Link></div><div className="support-filters"><Link className={`btn${source === "all" ? " primary" : ""}`} href={`/admin/support?view=${view}&source=all`}>All sources</Link><Link className={`btn${source === "dashboard" ? " primary" : ""}`} href={`/admin/support?view=${view}&source=dashboard`}>Dashboard</Link><Link className={`btn${source === "email" ? " primary" : ""}`} href={`/admin/support?view=${view}&source=email`}>Email</Link></div></div>
+    <div className="support-ticket-list" style={{ marginTop: 18 }}>{tickets.map((item) => {
+      const inbound = item.get("source") === "inbound_email";
+      const status = String(item.get("status") || "open"), lastSender = String(item.get("lastSender") || "customer");
+      const updated = item.get("updatedAt")?.toDate?.() || item.get("createdAt")?.toDate?.();
+      return <Link className="glass support-ticket-row" href={`/admin/support/${item.id}`} key={item.id}>
+        <div><div className="support-ticket-meta"><span>{inbound ? "Inbound email" : `Ticket #${item.id.slice(0, 8)}`}</span>{item.get("priority") === "high" ? <span className="support-priority">Priority</span> : null}</div><h3>{String(item.get("subject") || "Support request")}</h3><p className="muted support-preview">{String(item.get("lastMessage") || item.get("lastReply") || item.get("message") || "Open conversation")}</p><small className="muted">{inbound ? String(item.get("fromEmail") || "Email customer") : item.get("orderId") ? `Order #${String(item.get("orderId")).slice(0, 8)}` : "Dashboard customer"}</small></div>
+        <div className="support-ticket-state"><span className="status-pill">{adminState(status, lastSender, inbound)}</span><small className="muted">{updated ? updated.toLocaleString("en-NG", { dateStyle: "medium", timeStyle: "short" }) : "Recently"}</small></div>
+      </Link>;
+    })}{tickets.length === 0 ? <div className="glass card"><h2>Inbox is clear</h2><p className="muted">No conversations match the selected filters.</p></div> : null}</div>
   </AppShell>;
 }

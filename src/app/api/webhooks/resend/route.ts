@@ -29,11 +29,12 @@ export async function POST(request: Request) {
   const response = await fetch(`https://api.resend.com/emails/receiving/${encodeURIComponent(event.data.email_id)}`, { headers: { authorization: `Bearer ${apiKey}` }, cache: "no-store" });
   if (!response.ok) return new Response("Unable to retrieve received email", { status: 502 });
   const email = await response.json() as { from?: string; to?: string[]; subject?: string; text?: string | null; html?: string | null; attachments?: Array<{ filename?: string; content_type?: string }> };
+  const message = plainText(email.text || email.html || "No message body");
   await ref.create({
     source: "inbound_email", resendEmailId: event.data.email_id, webhookEventId: id,
     fromEmail: String(email.from || event.data.from || "unknown"), recipients: email.to || event.data.to || [],
     subject: String(email.subject || event.data.subject || "Email support request").slice(0, 200),
-    message: plainText(email.text || email.html || "No message body"),
+    message, lastMessage: message, lastSender: "customer", messageCount: 1,
     attachments: (email.attachments || event.data.attachments || []).slice(0, 20).map((item) => ({ filename: String(item.filename || "attachment").slice(0, 200), contentType: String(item.content_type || "application/octet-stream").slice(0, 100) })),
     priority: "normal", status: "open", createdAt: FieldValue.serverTimestamp(), updatedAt: FieldValue.serverTimestamp(),
   });

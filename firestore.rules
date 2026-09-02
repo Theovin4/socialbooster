@@ -16,8 +16,8 @@ service cloud.firestore {
     match /orderEvents/{id} { allow read: if signedIn() && (resource.data.userId == request.auth.uid || admin()); allow write: if false; }
     match /refills/{id} { allow read: if signedIn() && (resource.data.userId == request.auth.uid || admin()); allow write: if false; }
     match /transactions/{id} { allow read: if signedIn() && (resource.data.userId == request.auth.uid || admin()); allow write: if false; }
-    match /supportTickets/{id} { allow read: if signedIn() && (resource.data.userId == request.auth.uid || admin()); allow create: if signedIn() && request.resource.data.userId == request.auth.uid; allow update: if admin(); allow delete: if false; }
-    match /supportMessages/{id} { allow read: if signedIn() && (resource.data.userId == request.auth.uid || admin()); allow create: if signedIn() && request.resource.data.userId == request.auth.uid; allow update, delete: if false; }
+    match /supportTickets/{id} { allow read: if signedIn() && (resource.data.userId == request.auth.uid || admin()); allow write: if false; }
+    match /supportMessages/{id} { allow read: if signedIn() && (resource.data.userId == request.auth.uid || admin()); allow write: if false; }
     match /notifications/{id} { allow read, update: if signedIn() && resource.data.userId == request.auth.uid; allow create, delete: if false; }
     match /customerApiKeys/{id} { allow read: if signedIn() && resource.data.userId == request.auth.uid; allow write: if false; }
     match /services/{id} { allow read: if true; allow write: if false; }
