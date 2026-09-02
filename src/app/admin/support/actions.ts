@@ -38,7 +38,7 @@ export async function replyToDashboardTicket(formData: FormData) {
   if (snapshot.get("status") === "closed") throw new Error("Reopen this conversation before replying.");
   const userId = z.string().min(1).parse(snapshot.get("userId"));
   const message = db.collection("supportMessages").doc();
-  const attachments = await storeSupportFiles(input.ticketId, message.id, files);
+  const attachments = await storeSupportFiles(input.ticketId, message.id, userId, files);
   const batch = db.batch();
   batch.create(message, { ticketId: input.ticketId, userId, sender: "admin", adminId: admin.uid, message: input.message, attachments, createdAt: FieldValue.serverTimestamp() });
   batch.set(ref, { status: "open", lastMessage: input.message, lastSender: "admin", lastReply: input.message, messageCount: FieldValue.increment(1), repliedAt: FieldValue.serverTimestamp(), repliedBy: admin.uid, updatedAt: FieldValue.serverTimestamp() }, { merge: true });

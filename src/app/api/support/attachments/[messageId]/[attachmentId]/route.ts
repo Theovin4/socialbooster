@@ -1,7 +1,7 @@
-import { adminDb, adminStorage } from "@/lib/firebase/admin";
+import { adminDb } from "@/lib/firebase/admin";
 import { currentUser } from "@/lib/firebase/session";
 
-type Attachment = { id?: string; name?: string; contentType?: string; size?: number; path?: string };
+type Attachment = { id?: string; name?: string; contentType?: string; size?: number };
 
 export async function GET(_request: Request, { params }: { params: Promise<{ messageId: string; attachmentId: string }> }) {
   const user = await currentUser(true);
@@ -14,9 +14,12 @@ export async function GET(_request: Request, { params }: { params: Promise<{ mes
   const attachments = (Array.isArray(message.get("attachments")) ? message.get("attachments") : []) as Attachment[];
   const attachment = attachments.find((item) => item.id === attachmentId);
   const ticketId = String(message.get("ticketId") || "");
-  if (!attachment?.path || !ticketId || !attachment.path.startsWith(`support/${ticketId}/${messageId}/`)) return new Response("Attachment not found", { status: 404 });
-  const [contents] = await adminStorage().bucket().file(attachment.path).download();
-  const filename = (attachment.name || "attachment").replace(/["\\\r\n]/g, "_");
+  if (!attachment || !ticketId) return new Response("Attachment not found", { status: 404 });
+  const stored = await adminDb().collection("supportAttachments").doc(attachmentId).get();
+  if (!stored.exists || stored.get("ticketId") !== ticketId || stored.get("messageId") !== messageId || stored.get("userId") !== message.get("userId")) return new Response("Attachment not found", { status: 404 });
+  const contents = stored.get("bytes")?.toUint8Array?.() as Uint8Array | undefined;
+  if (!contents) return new Response("Attachment not found", { status: 404 });
+  const filename = String(stored.get("name") || attachment.name || "attachment").replace(/["\\\r\n]/g, "_");
   const body = contents.buffer.slice(contents.byteOffset, contents.byteOffset + contents.byteLength) as ArrayBuffer;
-  return new Response(body, { headers: { "content-type": attachment.contentType || "application/octet-stream", "content-length": String(contents.byteLength), "content-disposition": `attachment; filename="${filename}"`, "cache-control": "private, no-store", "x-content-type-options": "nosniff" } });
+  return new Response(body, { headers: { "content-type": String(stored.get("contentType") || attachment.contentType || "application/octet-stream"), "content-length": String(contents.byteLength), "content-disposition": `attachment; filename="${filename}"`, "cache-control": "private, no-store", "x-content-type-options": "nosniff" } });
 }

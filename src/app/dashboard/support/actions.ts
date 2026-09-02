@@ -31,7 +31,7 @@ export async function createSupportTicket(formData: FormData) {
   }
   const ticket = db.collection("supportTickets").doc();
   const message = db.collection("supportMessages").doc();
-  const attachments = await storeSupportFiles(ticket.id, message.id, files);
+  const attachments = await storeSupportFiles(ticket.id, message.id, user.uid, files);
   const batch = db.batch();
   batch.create(ticket, { userId: user.uid, orderId: input.orderId || null, subject: input.subject, message: input.message, status: "open", priority: input.orderId ? "high" : "normal", source: "dashboard", messageCount: 1, lastMessage: input.message, lastSender: "customer", createdAt: FieldValue.serverTimestamp(), updatedAt: FieldValue.serverTimestamp() });
   batch.create(message, { ticketId: ticket.id, userId: user.uid, sender: "customer", message: input.message, attachments, createdAt: FieldValue.serverTimestamp() });
@@ -51,7 +51,7 @@ export async function replyToSupportTicket(formData: FormData) {
   if (snapshot.get("status") === "closed") throw new Error("Reopen this ticket before replying.");
   const db = adminDb();
   const message = db.collection("supportMessages").doc();
-  const attachments = await storeSupportFiles(input.ticketId, message.id, files);
+  const attachments = await storeSupportFiles(input.ticketId, message.id, user.uid, files);
   const batch = db.batch();
   batch.create(message, { ticketId: input.ticketId, userId: user.uid, sender: "customer", message: input.message, attachments, createdAt: FieldValue.serverTimestamp() });
   batch.set(ref, { status: "open", lastMessage: input.message, lastSender: "customer", messageCount: FieldValue.increment(1), updatedAt: FieldValue.serverTimestamp() }, { merge: true });

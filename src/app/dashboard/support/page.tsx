@@ -37,7 +37,7 @@ export default async function SupportPage({ searchParams }: { searchParams: Prom
           <label>Order ID <span className="muted">(optional)</span><input className="field" name="orderId" defaultValue={order} /></label>
           <label>Subject<input className="field" name="subject" required minLength={5} maxLength={120} defaultValue={order ? "Order delivery issue" : ""} placeholder="Summarise the issue" /></label>
           <label>Message<textarea className="field" name="message" required minLength={15} maxLength={3000} rows={6} defaultValue={order ? "Please review this order. The delivery shown in my account does not match what I received." : ""} placeholder="Include the relevant details and what you need help with." /></label>
-          <label>Supporting files <span className="muted">(optional)</span><input className="field" type="file" name="attachments" accept=".jpg,.jpeg,.png,.webp,.pdf,.txt" multiple /><small className="muted">Up to 3 JPG, PNG, WebP, PDF or TXT files; 3 MB total. Never upload passwords, PINs, CVVs or OTPs.</small></label>
+          <label>Supporting files <span className="muted">(optional)</span><input className="field" type="file" name="attachments" accept=".jpg,.jpeg,.png,.webp,.pdf,.txt" multiple /><small className="muted">Up to 3 JPG, PNG, WebP, PDF or TXT files; 700 KB each and 2 MB total. Never upload passwords, PINs, CVVs or OTPs.</small></label>
           <button className="btn primary" type="submit">Start support conversation</button>
         </form>
         {whatsapp ? <p style={{ marginTop: 18 }}><a className="btn" href={`https://wa.me/${whatsapp}`} target="_blank" rel="noreferrer">Contact support on WhatsApp</a></p> : null}

@@ -23,8 +23,8 @@ describe("support attachment validation", () => {
     await expect(validateSupportFiles(formWith(text(), text(), text(), text()))).rejects.toThrow("no more than 3 files");
   });
 
-  it("rejects a combined payload larger than three megabytes", async () => {
-    const file = new File([new Uint8Array(3 * 1024 * 1024 + 1)], "large.txt", { type: "text/plain" });
-    await expect(validateSupportFiles(formWith(file))).rejects.toThrow("3 MB or less");
+  it("rejects an individual file larger than 700 KB", async () => {
+    const file = new File([new Uint8Array(700 * 1024 + 1)], "large.txt", { type: "text/plain" });
+    await expect(validateSupportFiles(formWith(file))).rejects.toThrow("700 KB or less");
   });
 });
