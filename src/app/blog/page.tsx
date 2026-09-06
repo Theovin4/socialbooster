@@ -14,7 +14,7 @@ export default function BlogPage() {
   return <><SiteHeader /><main className="shell" style={{ minHeight: "65vh", padding: "90px 0" }}>
     <span className="eyebrow">Nigeria marketing guides</span>
     <h1 style={{ fontSize: "clamp(2.8rem,7vw,5rem)", letterSpacing: "-.055em" }}>Practical social media guidance.</h1>
-    <p className="muted" style={{ fontSize: 19, maxWidth: 760, lineHeight: 1.7 }}>Explore {Object.keys(guides).length} clear, responsible guides for Nigerian creators and businesses building visibility, trust and sales online.</p>
+    <p className="muted page-lead">{Object.keys(guides).length} guides for Nigerian creators and businesses.</p>
     <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(min(100%, 330px), 1fr))", gap: 18, marginTop: 40 }}>
       {Object.entries(guides).map(([slug, item]) => <article className="glass card" key={slug} style={{ display: "flex", flexDirection: "column", alignItems: "flex-start" }}>
         <span className="eyebrow">{item.category}{(evergreenSlugs as readonly string[]).includes(slug) ? " · Evergreen" : ""}</span>

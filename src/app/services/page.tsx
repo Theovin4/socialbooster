@@ -55,7 +55,7 @@ export default async function Services({ searchParams }: { searchParams: Promise
   return <><SiteHeader /><main className="shell" style={{ minHeight: "68vh", padding: "78px 0" }}>
     <span className="eyebrow">Social media services in Nigeria</span>
     <h1 style={{ fontSize: "clamp(2.7rem,7vw,5rem)", letterSpacing: "-.055em", margin: "14px 0" }}>Compare services and prices in naira.</h1>
-    <p className="muted page-lead">Explore current Instagram, TikTok, YouTube, Facebook and other social media marketing options. Compare service details, prices, order limits and refill availability before choosing.</p>
+    <p className="muted page-lead">Compare prices, limits and refill availability.</p>
     <form className="glass" action="/services" style={{ display: "flex", gap: 10, maxWidth: 820, margin: "32px 0", padding: 10, borderRadius: 16 }}>
       <input className="field" name="q" defaultValue={q} aria-label="Search services" placeholder="Search platform, category, service or ID" />
       <button className="btn primary">Search</button>

@@ -101,18 +101,13 @@ export default async function FinancePage({
     <AppShell admin>
       <div className="section-head">
         <div>
-          <span className="eyebrow">Financial intelligence</span>
           <h1 className="page-heading">Finance</h1>
-          <p className="muted page-lead">
-            Auditable sales, cost, profit, cash and customer-liability metrics
-            from Firebase.
-          </p>
         </div>
         <a
           className="btn primary"
           href={`/api/admin/finance/export?${exportQuery}`}
         >
-          Download Excel workbook
+          Download Excel
         </a>
       </div>
       <form className="glass card finance-filters">
@@ -162,11 +157,10 @@ export default async function FinancePage({
         </Link>
       </form>
       <div className="finance-kpis">
-        {cards.map(([label, value, note]) => (
+        {cards.map(([label, value]) => (
           <article className="glass card stat-card" key={label}>
             <span className="muted">{label}</span>
             <strong className="stat-value finance-value">{money(value)}</strong>
-            <small className="muted">{note}</small>
           </article>
         ))}
       </div>

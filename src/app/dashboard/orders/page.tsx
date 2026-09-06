@@ -94,20 +94,18 @@ export default async function OrdersPage({
         <Toast
           kind="info"
           title="Showing the latest saved update"
-          message="Live status is temporarily unavailable. Your order is still safe; try refreshing again shortly."
+          message="Live status is unavailable. Try again shortly."
         />
       ) : refresh === "1" ? (
         <Toast
           kind="success"
           title="Orders refreshed"
-          message="The latest available service progress has been loaded."
+          message="Latest progress loaded."
         />
       ) : null}
-      <span className="eyebrow">Order management</span>
       <h1 className="page-heading">Your orders</h1>
       <p className="muted page-lead">
-        Track start count, remaining quantity and delivery progress. Active
-        orders refresh automatically when this page is opened.
+        Track start count, remaining quantity and delivery progress.
       </p>
       <div className="section-head">
         <div className="order-filters">
@@ -140,10 +138,7 @@ export default async function OrdersPage({
       </div>
       {orders.length === 0 ? (
         <div className="glass card">
-          <h2>No matching orders</h2>
-          <p className="muted">
-            Place your first order or choose another filter.
-          </p>
+          <h2>No orders found</h2>
           <Link className="btn primary" href="/dashboard/new-order">
             Create order
           </Link>

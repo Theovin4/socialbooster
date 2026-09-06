@@ -22,9 +22,8 @@ export default async function SupportPage({ searchParams }: { searchParams: Prom
   const tickets = allTickets.filter((item) => view === "closed" ? item.get("status") === "closed" : view === "all" ? true : item.get("status") !== "closed");
   const whatsapp = (process.env.NEXT_PUBLIC_WHATSAPP || "").replace(/\D/g, "");
   return <AppShell>
-    <span className="eyebrow">Customer care</span>
-    <h1 className="page-heading">Support centre</h1>
-    <p className="muted page-lead">Keep each issue in one private conversation. Support aims to respond within 24 hours.</p>
+    <h1 className="page-heading">Support</h1>
+    <p className="muted page-lead">Response time: within 24 hours.</p>
     <div className="grid3" style={{ margin: "28px 0" }}>
       <div className="glass card"><p className="muted">Open conversations</p><strong style={{ fontSize: 34 }}>{openCount}</strong></div>
       <div className="glass card"><p className="muted">Closed conversations</p><strong style={{ fontSize: 34 }}>{closedCount}</strong></div>
@@ -32,13 +31,13 @@ export default async function SupportPage({ searchParams }: { searchParams: Prom
     </div>
     <div className="support-layout">
       <section className="glass card support-compose">
-        <span className="eyebrow">New conversation</span><h2>How can we help?</h2>
+        <h2>New conversation</h2>
         <form action={createSupportTicket} encType="multipart/form-data" style={{ display: "grid", gap: 16 }}>
           <label>Order ID <span className="muted">(optional)</span><input className="field" name="orderId" defaultValue={order} /></label>
           <label>Subject<input className="field" name="subject" required minLength={5} maxLength={120} defaultValue={order ? "Order delivery issue" : ""} placeholder="Summarise the issue" /></label>
           <label>Message<textarea className="field" name="message" required minLength={15} maxLength={3000} rows={6} defaultValue={order ? "Please review this order. The delivery shown in my account does not match what I received." : ""} placeholder="Include the relevant details and what you need help with." /></label>
           <label>Supporting files <span className="muted">(optional)</span><input className="field" type="file" name="attachments" accept=".jpg,.jpeg,.png,.webp,.pdf,.txt" multiple /><small className="muted">Up to 3 JPG, PNG, WebP, PDF or TXT files; 700 KB each and 2 MB total. Never upload passwords, PINs, CVVs or OTPs.</small></label>
-          <button className="btn primary" type="submit">Start support conversation</button>
+          <button className="btn primary" type="submit">Send message</button>
         </form>
         {whatsapp ? <p style={{ marginTop: 18 }}><a className="btn" href={`https://wa.me/${whatsapp}`} target="_blank" rel="noreferrer">Contact support on WhatsApp</a></p> : null}
       </section>

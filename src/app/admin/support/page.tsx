@@ -26,8 +26,8 @@ export default async function AdminSupportPage({ searchParams }: { searchParams:
     return statusMatch && sourceMatch;
   });
   return <AppShell admin>
-    <span className="eyebrow">Customer care</span><h1 className="page-heading">Support inbox</h1>
-    <p className="muted page-lead">Dashboard conversations and messages received at support@socialbooster.net.ng, organised in one private inbox.</p>
+    <h1 className="page-heading">Support inbox</h1>
+    <p className="muted page-lead">Customer conversations and inbound email.</p>
     <div className="grid3" style={{ margin: "28px 0" }}><div className="glass card"><p className="muted">Needs response</p><strong style={{ fontSize: 34 }}>{needsResponse}</strong></div><div className="glass card"><p className="muted">Open</p><strong style={{ fontSize: 34 }}>{openCount}</strong></div><div className="glass card"><p className="muted">Closed</p><strong style={{ fontSize: 34 }}>{closedCount}</strong></div></div>
     <div className="glass card support-admin-toolbar"><div className="support-filters"><Link className={`btn${view === "needs-response" ? " primary" : ""}`} href={`/admin/support?view=needs-response&source=${source}`}>Needs response</Link><Link className={`btn${view === "open" ? " primary" : ""}`} href={`/admin/support?view=open&source=${source}`}>Open</Link><Link className={`btn${view === "closed" ? " primary" : ""}`} href={`/admin/support?view=closed&source=${source}`}>Closed</Link><Link className={`btn${view === "all" ? " primary" : ""}`} href={`/admin/support?view=all&source=${source}`}>All</Link></div><div className="support-filters"><Link className={`btn${source === "all" ? " primary" : ""}`} href={`/admin/support?view=${view}&source=all`}>All sources</Link><Link className={`btn${source === "dashboard" ? " primary" : ""}`} href={`/admin/support?view=${view}&source=dashboard`}>Dashboard</Link><Link className={`btn${source === "email" ? " primary" : ""}`} href={`/admin/support?view=${view}&source=email`}>Email</Link></div></div>
     <div className="support-ticket-list" style={{ marginTop: 18 }}>{tickets.map((item) => {
@@ -38,6 +38,6 @@ export default async function AdminSupportPage({ searchParams }: { searchParams:
         <div><div className="support-ticket-meta"><span>{inbound ? "Inbound email" : `Ticket #${item.id.slice(0, 8)}`}</span>{item.get("priority") === "high" ? <span className="support-priority">Priority</span> : null}</div><h3>{String(item.get("subject") || "Support request")}</h3><p className="muted support-preview">{String(item.get("lastMessage") || item.get("lastReply") || item.get("message") || "Open conversation")}</p><small className="muted">{inbound ? String(item.get("fromEmail") || "Email customer") : item.get("orderId") ? `Order #${String(item.get("orderId")).slice(0, 8)}` : "Dashboard customer"}</small></div>
         <div className="support-ticket-state"><span className="status-pill">{adminState(status, lastSender, inbound)}</span><small className="muted">{updated ? updated.toLocaleString("en-NG", { dateStyle: "medium", timeStyle: "short" }) : "Recently"}</small></div>
       </Link>;
-    })}{tickets.length === 0 ? <div className="glass card"><h2>Inbox is clear</h2><p className="muted">No conversations match the selected filters.</p></div> : null}</div>
+    })}{tickets.length === 0 ? <div className="glass card"><h2>No conversations found</h2></div> : null}</div>
   </AppShell>;
 }

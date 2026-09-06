@@ -10,5 +10,5 @@ export default async function NewOrderPage({ searchParams }: { searchParams: Pro
   const { service } = await searchParams;
   const snapshot = await adminDb().collection("services").where("active", "==", true).get();
   const services: OrderService[] = snapshot.docs.map((doc) => { const item = doc.data(); return { id: doc.id, name: String(item.name), category: String(item.categoryName), min: Number(item.minQuantity), max: Number(item.maxQuantity), rateMinor: Number(serviceSellingRateNgnMinor(item)), refill: item.refillSupported === true, cancel: item.cancelSupported === true, description: String(item.description || "") }; }).sort((a, b) => a.category.localeCompare(b.category) || a.name.localeCompare(b.name));
-  return <AppShell><span className="eyebrow">New order</span><h1 className="page-heading">Create a new order</h1><p className="muted page-lead">Choose a service, review its limits, and confirm the exact naira charge before submitting.</p><NewOrderForm services={services} selectedId={service} action={submitOrder} /></AppShell>;
+  return <AppShell><h1 className="page-heading">New order</h1><p className="muted page-lead">Choose a service and confirm your order.</p><NewOrderForm services={services} selectedId={service} action={submitOrder} /></AppShell>;
 }
