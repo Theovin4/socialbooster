@@ -12,7 +12,7 @@ export const metadata: Metadata = {
   keywords: ["social media marketing services Nigeria", "social media services Africa", "Instagram marketing Nigeria", "TikTok promotion Africa", "YouTube promotion Nigeria", "social media reseller panel Africa"],
   alternates: { canonical: "/", languages: { "en-NG": "/", "x-default": "/" } },
   openGraph: { type: "website", locale: "en_NG", url: siteUrl, siteName: "Social Booster", title: "Social Booster | Social Media Services for Nigeria and Africa", description: "Compare social media marketing services, pay securely and track every order from one dashboard." },
-  twitter: { card: "summary_large_image", title: "Social Booster Nigeria", description: "Social media marketing services with transparent NGN pricing." },
+  twitter: { card: "summary_large_image", title: "Social Booster Nigeria", description: "Professional social media services with secure payments and live order tracking." },
   robots: { index: true, follow: true, googleBot: { index: true, follow: true, "max-image-preview": "large", "max-snippet": -1, "max-video-preview": -1 } },
   category: "business",
   verification: { google: process.env.NEXT_PUBLIC_GOOGLE_SITE_VERIFICATION },

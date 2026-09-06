@@ -14,10 +14,10 @@ export async function generateMetadata({ searchParams }: { searchParams: Promise
   const { q = "" } = await searchParams;
   return {
     title: "Social Media Marketing Services in Nigeria",
-    description: "Compare Instagram, TikTok, YouTube, Facebook and other social media marketing services with clear Nigerian naira prices, limits and support options.",
+    description: "Compare Instagram, TikTok, YouTube, Facebook and other social media marketing services with current prices, limits and support options.",
     alternates: { canonical: "/services" },
     robots: q.trim() ? { index: false, follow: true } : { index: true, follow: true },
-    openGraph: { title: "Social Media Marketing Services in Nigeria", description: "Browse current social media service options and transparent NGN pricing.", url: "/services" },
+    openGraph: { title: "Social Media Marketing Services in Nigeria", description: "Browse current social media services, prices and order requirements.", url: "/services" },
   };
 }
 
@@ -54,7 +54,7 @@ export default async function Services({ searchParams }: { searchParams: Promise
 
   return <><SiteHeader /><main className="shell" style={{ minHeight: "68vh", padding: "78px 0" }}>
     <span className="eyebrow">Social media services in Nigeria</span>
-    <h1 style={{ fontSize: "clamp(2.7rem,7vw,5rem)", letterSpacing: "-.055em", margin: "14px 0" }}>Compare services and prices in naira.</h1>
+    <h1 style={{ fontSize: "clamp(2.7rem,7vw,5rem)", letterSpacing: "-.055em", margin: "14px 0" }}>Find the right service for your goals.</h1>
     <p className="muted page-lead">Compare prices, limits and refill availability.</p>
     <form className="glass" action="/services" style={{ display: "flex", gap: 10, maxWidth: 820, margin: "32px 0", padding: 10, borderRadius: 16 }}>
       <input className="field" name="q" defaultValue={q} aria-label="Search services" placeholder="Search platform, category, service or ID" />
