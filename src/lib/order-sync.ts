@@ -2,7 +2,7 @@ import { FieldValue, type DocumentSnapshot } from "firebase-admin/firestore";
 import { adminDb } from "./firebase/admin";
 import { postWallet } from "./firebase/wallet";
 import { serviceCostMinor } from "./money";
-import { FollowsPanelClient } from "./providers/followspanel";
+import { getProvider, normalizeProviderKey } from "./providers";
 import { verifiedProviderStatus } from "./order-status";
 import { sendUserEmail } from "./email";
 import { orderStatusEmailCopy, shouldSendOrderStatusEmail } from "./order-email-policy";
@@ -26,16 +26,28 @@ export async function synchronizeOrderDocuments(documents: DocumentSnapshot[], f
   });
   if (!eligible.length) return { checked: 0, updated: 0 };
   const db = adminDb();
-  const statuses = await new FollowsPanelClient().statuses(eligible.map((doc) => doc.get("providerOrderId")));
+  const grouped = new Map<string, DocumentSnapshot[]>();
+  for (const doc of eligible) {
+    const key = normalizeProviderKey(doc.get("providerKey"));
+    grouped.set(key, [...(grouped.get(key) || []), doc]);
+  }
+  const statusesByProvider = new Map<string, Record<string, { charge?: string; start_count?: string; status: string; remains?: string; currency?: string }>>();
+  await Promise.all(Array.from(grouped.entries()).map(async ([key, docs]) => {
+    const provider = getProvider(key);
+    if (!provider.configured) { console.warn("[order-sync] provider not configured", { providerKey: key, orderCount: docs.length }); return; }
+    try { statusesByProvider.set(key, await provider.client.statuses(docs.map((doc) => Number(doc.get("providerOrderId"))))); }
+    catch (error) { console.error("[order-sync] provider status failed", { providerKey: key, orderCount: docs.length, error: error instanceof Error ? error.message : String(error) }); }
+  }));
   let updated = 0;
   for (const doc of eligible) {
-    const provider = statuses[String(doc.get("providerOrderId"))];
+    const providerKey = normalizeProviderKey(doc.get("providerKey"));
+    const provider = statusesByProvider.get(providerKey)?.[String(doc.get("providerOrderId"))];
     if (!provider) continue;
     const startCount = integer(provider.start_count);
     const remains = integer(provider.remains);
     const status = verifiedProviderStatus(provider.status, startCount, remains);
     const previous = doc.get("status");
-    console.info("[order-sync] provider status", { orderId: doc.id, providerOrderId: doc.get("providerOrderId"), providerStatus: provider.status, resolvedStatus: status, startCount, remains });
+    console.info("[order-sync] provider status", { orderId: doc.id, providerKey, providerOrderId: doc.get("providerOrderId"), providerStatus: provider.status, resolvedStatus: status, startCount, remains });
     const update: Record<string, unknown> = { status, providerStatus: provider.status, providerCharge: provider.charge || null, lastProviderUpdate: FieldValue.serverTimestamp(), updatedAt: FieldValue.serverTimestamp() };
     if (startCount !== null) update.startCount = startCount;
     if (remains !== null) update.remains = remains;

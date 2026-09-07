@@ -7,6 +7,7 @@ import { configuredMarginBps, decimalToMinor, sellingPriceMinor } from "@/lib/mo
 import { synchronizeAllProviderServices } from "@/lib/services-sync";
 
 const refresh = () => { revalidatePath("/admin/services"); revalidatePath("/services"); };
+const validServiceId = (id: string) => /^(?:\d+|(?:nitro|smmworld)_\d+)$/.test(id);
 
 export async function syncAllServices() {
   await requireAdmin();
@@ -17,25 +18,25 @@ export async function syncAllServices() {
 
 export async function approveService(formData: FormData) {
   const admin = await requireAdmin(), id = String(formData.get("id") || "");
-  if (!/^\d+$/.test(id)) throw new Error("Invalid service ID");
+  if (!validServiceId(id)) throw new Error("Invalid service ID");
   const db = adminDb(), provider = await db.collection("providerServices").doc(id).get();
   if (!provider.exists) throw new Error("Provider service not found");
-  const data = provider.data()!, providerRateMinor = decimalToMinor(String(data.rateText)), markupBps = configuredMarginBps();
+  const data = provider.data()!, providerRateMinor = BigInt(data.providerRateNgnMinor ?? decimalToMinor(String(data.rateText))), markupBps = configuredMarginBps();
   const sellingRateMinor = sellingPriceMinor(providerRateMinor, markupBps), grossMarginBps = Number((sellingRateMinor-providerRateMinor)*10000n/sellingRateMinor);
-  await db.collection("services").doc(id).set({ providerServiceId: data.providerServiceId, name: data.name, categoryName: data.categoryName, type: data.type, minQuantity: data.minQuantity, maxQuantity: data.maxQuantity, refillSupported: data.refillSupported, cancelSupported: data.cancelSupported, providerCurrency: "NGN", sellingCurrency: "NGN", providerRateMinor: Number(providerRateMinor), providerRateNgnMinor: Number(providerRateMinor), sellingRateMinor: Number(sellingRateMinor), pricingModel: "ngn_markup_v1", markupBps: Number(markupBps), grossMarginBps, marginBps: FieldValue.delete(), customSellingRateMinor: FieldValue.delete(), active: true, approvedBy: admin.uid, approvedAt: FieldValue.serverTimestamp(), updatedAt: FieldValue.serverTimestamp() }, { merge: true });
+  await db.collection("services").doc(id).set({ providerKey: data.providerKey || "followspanel", providerLabel: data.providerLabel || "Followpanel", providerServiceId: data.providerServiceId, name: data.name, categoryName: data.categoryName, type: data.type, minQuantity: data.minQuantity, maxQuantity: data.maxQuantity, refillSupported: data.refillSupported, cancelSupported: data.cancelSupported, providerCurrency: data.providerCurrency || "NGN", sellingCurrency: "NGN", providerRateMinor: Number(providerRateMinor), providerRateNgnMinor: Number(providerRateMinor), sellingRateMinor: Number(sellingRateMinor), pricingModel: "ngn_markup_v1", markupBps: Number(markupBps), grossMarginBps, marginBps: FieldValue.delete(), customSellingRateMinor: FieldValue.delete(), active: true, approvedBy: admin.uid, approvedAt: FieldValue.serverTimestamp(), updatedAt: FieldValue.serverTimestamp() }, { merge: true });
   refresh();
 }
 
 export async function setServiceActive(formData: FormData) {
   const admin = await requireAdmin(), id = String(formData.get("id") || ""), active = String(formData.get("active")) === "true";
-  if (!/^\d+$/.test(id)) throw new Error("Invalid service ID");
+  if (!validServiceId(id)) throw new Error("Invalid service ID");
   await adminDb().collection("services").doc(id).set({ active, updatedBy: admin.uid, updatedAt: FieldValue.serverTimestamp() }, { merge: true });
   refresh();
 }
 
 export async function setServicePriceOverride(formData: FormData) {
   const admin = await requireAdmin(), id = String(formData.get("id") || ""), price = String(formData.get("price") || "").trim();
-  if (!/^\d+$/.test(id)) throw new Error("Invalid service ID");
+  if (!validServiceId(id)) throw new Error("Invalid service ID");
   const db = adminDb(), ref = db.collection("services").doc(id), snapshot = await ref.get();
   if (!snapshot.exists) throw new Error("Approved service not found");
   const data = snapshot.data()!, providerRateMinor = BigInt(data.providerRateMinor), markupBps = configuredMarginBps(), providerRateNgnMinor = providerRateMinor;

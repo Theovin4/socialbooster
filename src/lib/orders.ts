@@ -4,13 +4,14 @@ import { adminDb } from "./firebase/admin";
 import { postWallet } from "./firebase/wallet";
 import { serviceCostMinor } from "./money";
 import { serviceSellingRateNgnMinor } from "./currency";
-import { FollowsPanelClient, ProviderError } from "./providers/followspanel";
+import { ProviderError } from "./providers/followspanel";
+import { getProvider, normalizeProviderKey } from "./providers";
 import { sendAdminAlert, sendUserEmail } from "./email";
 
 export type NewOrder = { userId: string; serviceId: string; link: string; quantity: number; idempotencyKey: string };
 export async function createAndSubmitOrder(input: NewOrder) {
   if (process.env.ORDER_SUBMISSION_ENABLED !== "true") throw new Error("Order submission is not enabled");
-  if (!/^\d+$/.test(input.serviceId) || !Number.isSafeInteger(input.quantity) || input.quantity <= 0) throw new Error("Invalid order");
+  if (!/^(?:\d+|(?:nitro|smmworld)_\d+)$/.test(input.serviceId) || !Number.isSafeInteger(input.quantity) || input.quantity <= 0) throw new Error("Invalid order");
   const url = new URL(input.link); if (!['http:', 'https:'].includes(url.protocol)) throw new Error("Invalid target URL");
   const db = adminDb(), orderRef = db.collection("orders").doc(input.idempotencyKey), walletRef = db.collection("wallets").doc(input.userId), serviceRef = db.collection("services").doc(input.serviceId);
   const local = await db.runTransaction(async (transaction) => {
@@ -31,17 +32,20 @@ export async function createAndSubmitOrder(input: NewOrder) {
     transaction.create(db.collection("walletTransactions").doc(walletTransactionId), { userId: input.userId, type: "order_debit", deltaMinor: -customerPriceMinor, currency, idempotencyKey: walletTransactionId, reference: orderRef.id, balanceBeforeMinor: available, balanceAfterMinor: next, status: "posted", createdAt: FieldValue.serverTimestamp() });
     transaction.create(db.collection("walletLedger").doc(walletTransactionId), { walletUserId: input.userId, transactionId: walletTransactionId, type: "order_debit", deltaMinor: -customerPriceMinor, currency, balanceBeforeMinor: available, balanceAfterMinor: next, reference: orderRef.id, createdAt: FieldValue.serverTimestamp() });
     const grossProfitMinor = customerPriceMinor - convertedProviderCostMinor;
-    const order = { userId: input.userId, serviceId: input.serviceId, serviceName: data.name, providerServiceId: data.providerServiceId, link: input.link, quantity: input.quantity, currency, sellingRateMinor: Number(sellingRateMinor), providerCurrency: "NGN", providerRateMinor: data.providerRateMinor, providerCostMinor, convertedProviderCostMinor, customerPriceMinor, grossProfitMinor, markupBps: data.markupBps ?? 4000, grossMarginBps: Math.floor(grossProfitMinor * 10000 / customerPriceMinor), pricingModel: "ngn_markup_v1", refillSupported: data.refillSupported, cancelSupported: data.cancelSupported, status: "submitting", idempotencyKey: input.idempotencyKey, createdAt: FieldValue.serverTimestamp(), updatedAt: FieldValue.serverTimestamp() };
+    const providerKey = normalizeProviderKey(data.providerKey);
+    const order = { userId: input.userId, serviceId: input.serviceId, serviceName: data.name, providerKey, providerLabel: data.providerLabel || getProvider(providerKey).label, providerServiceId: data.providerServiceId, link: input.link, quantity: input.quantity, currency, sellingRateMinor: Number(sellingRateMinor), providerCurrency: data.providerCurrency || "NGN", providerRateMinor: data.providerRateMinor, providerCostMinor, convertedProviderCostMinor, customerPriceMinor, grossProfitMinor, markupBps: data.markupBps ?? 4000, grossMarginBps: Math.floor(grossProfitMinor * 10000 / customerPriceMinor), pricingModel: "ngn_markup_v1", refillSupported: data.refillSupported, cancelSupported: data.cancelSupported, status: "submitting", idempotencyKey: input.idempotencyKey, createdAt: FieldValue.serverTimestamp(), updatedAt: FieldValue.serverTimestamp() };
     transaction.create(orderRef, order); transaction.create(db.collection("orderEvents").doc(), { orderId: orderRef.id, userId: input.userId, status: "submitting", createdAt: FieldValue.serverTimestamp() });
     return order;
   });
   if (("providerOrderId" in local && local.providerOrderId) || local.status !== "submitting") return { id: orderRef.id, status: local.status };
   try {
-    const result = await new FollowsPanelClient().add(Number(local.providerServiceId), input.link, input.quantity);
-    console.info("[order-submit] provider accepted", { orderId: orderRef.id, providerOrderId: result.order, providerServiceId: local.providerServiceId, quantity: input.quantity });
+    const provider = getProvider(local.providerKey);
+    if (!provider.configured) throw new ProviderError("Selected provider is not configured", "NOT_CONFIGURED");
+    const result = await provider.client.add(Number(local.providerServiceId), input.link, input.quantity);
+    console.info("[order-submit] provider accepted", { orderId: orderRef.id, providerKey: provider.key, providerOrderId: result.order, providerServiceId: local.providerServiceId, quantity: input.quantity });
     await orderRef.set({ providerOrderId: result.order, status: "pending", submittedAt: FieldValue.serverTimestamp(), updatedAt: FieldValue.serverTimestamp() }, { merge: true });
     await db.collection("orderEvents").add({ orderId: orderRef.id, userId: input.userId, status: "pending", createdAt: FieldValue.serverTimestamp() });
-    await sendAdminAlert({ subject: `New order #${orderRef.id.slice(0, 8)}`, title: "New customer order", message: `${String(local.serviceName)} · Quantity ${input.quantity.toLocaleString("en-NG")} · Charge NGN ${(Number(local.customerPriceMinor) / 100).toLocaleString("en-NG", { minimumFractionDigits: 2 })} · Followpanel order ${result.order}.`, buttonLabel: "Review live order", buttonUrl: `${process.env.NEXT_PUBLIC_APP_URL || "https://www.socialbooster.net.ng"}/admin/provider` }).catch((error) => console.warn("[admin-order-email] delivery failed", { orderId: orderRef.id, error: error instanceof Error ? error.message : "Unknown error" }));
+    await sendAdminAlert({ subject: `New order #${orderRef.id.slice(0, 8)}`, title: "New customer order", message: `${String(local.serviceName)} · Quantity ${input.quantity.toLocaleString("en-NG")} · Charge NGN ${(Number(local.customerPriceMinor) / 100).toLocaleString("en-NG", { minimumFractionDigits: 2 })} · ${provider.label} order ${result.order}.`, buttonLabel: "Review live order", buttonUrl: `${process.env.NEXT_PUBLIC_APP_URL || "https://www.socialbooster.net.ng"}/admin/provider` }).catch((error) => console.warn("[admin-order-email] delivery failed", { orderId: orderRef.id, error: error instanceof Error ? error.message : "Unknown error" }));
     await sendUserEmail(input.userId, { subject: `Order #${orderRef.id.slice(0, 8)} confirmed`, title: "Order confirmed", message: `Your ${String(local.serviceName)} order for ${input.quantity.toLocaleString("en-NG")} has been accepted. You can view its verified status, start count and remaining quantity from your order dashboard.`, buttonLabel: "Track order", buttonUrl: `${process.env.NEXT_PUBLIC_APP_URL || "https://www.socialbooster.net.ng"}/dashboard/orders/${orderRef.id}` }).then(() => orderRef.set({ customerRoutineEmailCount: FieldValue.increment(1), confirmationEmailSentAt: FieldValue.serverTimestamp() }, { merge: true })).catch((error) => console.warn("[order-confirmation-email] delivery failed", { orderId: orderRef.id, error: error instanceof Error ? error.message : "Unknown error" }));
     return { id: orderRef.id, status: "pending" };
   } catch (error) {

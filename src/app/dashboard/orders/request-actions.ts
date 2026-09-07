@@ -5,7 +5,7 @@ import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 import { adminDb } from "@/lib/firebase/admin";
 import { requireUser } from "@/lib/firebase/session";
-import { FollowsPanelClient } from "@/lib/providers/followspanel";
+import { getProvider } from "@/lib/providers";
 import { sendAdminAlert } from "@/lib/email";
 
 async function ownedOrder(id: string, userId: string) {
@@ -19,8 +19,9 @@ export async function requestRefill(formData: FormData) {
   if (!data.refillSupported || !data.providerOrderId || data.status !== "completed") throw new Error("Refill is not available");
   const db = adminDb(), refillRef = db.collection("refills").doc(id), existing = await refillRef.get();
   if (existing.exists) return;
-  await refillRef.create({ orderId: id, userId: user.uid, status: "submitting", createdAt: FieldValue.serverTimestamp() });
-  try { const result = await new FollowsPanelClient().refill(data.providerOrderId); await refillRef.set({ providerRefillId: result.refill, status: "pending", updatedAt: FieldValue.serverTimestamp() }, { merge: true }); }
+  const provider = getProvider(data.providerKey);
+  await refillRef.create({ orderId: id, userId: user.uid, providerKey: provider.key, status: "submitting", createdAt: FieldValue.serverTimestamp() });
+  try { const result = await provider.client.refill(data.providerOrderId); await refillRef.set({ providerRefillId: result.refill, status: "pending", updatedAt: FieldValue.serverTimestamp() }, { merge: true }); }
   catch { await refillRef.set({ status: "provider_confirmation_required", updatedAt: FieldValue.serverTimestamp() }, { merge: true }); }
   revalidatePath(`/dashboard/orders/${id}`); revalidatePath("/dashboard/refills");
 }
@@ -33,7 +34,7 @@ export async function requestCancellation(formData: FormData) {
   await ref.set({ cancellationRequestedAt: FieldValue.serverTimestamp(), cancellationStatus: "submitting", statusBeforeCancellation: previousStatus, status: "cancel_requested", updatedAt: FieldValue.serverTimestamp() }, { merge: true });
   let notice = "cancellation-pending";
   try {
-    const [result] = await new FollowsPanelClient().cancel([Number(data.providerOrderId)]);
+    const [result] = await getProvider(data.providerKey).client.cancel([Number(data.providerOrderId)]);
     if (result?.accepted) {
       await ref.set({ cancellationStatus: "submitted", cancellationProviderResponse: { accepted: true, order: result.order }, updatedAt: FieldValue.serverTimestamp() }, { merge: true });
       await db.collection("orderEvents").add({ orderId: id, userId: user.uid, status: "cancel_requested", previousStatus, providerOrderId: data.providerOrderId, createdAt: FieldValue.serverTimestamp() });
@@ -57,7 +58,7 @@ export async function requestCancellation(formData: FormData) {
     outcome: notice,
     createdAt: FieldValue.serverTimestamp(),
   });
-  await sendAdminAlert({ subject: `Cancellation request #${id.slice(0, 8)}`, title: "Customer cancellation request", message: `A customer requested cancellation for Social Booster order #${id.slice(0, 8)} / Followpanel order ${data.providerOrderId}. Current state: ${notice.replaceAll("-", " ")}.`, buttonLabel: "Review live order", buttonUrl: `${process.env.NEXT_PUBLIC_APP_URL || "https://www.socialbooster.net.ng"}/admin/provider` }).catch((error) => console.warn("[cancellation-alert] delivery failed", { orderId: id, error: error instanceof Error ? error.message : "Unknown error" }));
+  await sendAdminAlert({ subject: `Cancellation request #${id.slice(0, 8)}`, title: "Customer cancellation request", message: `A customer requested cancellation for Social Booster order #${id.slice(0, 8)}. External order ${data.providerOrderId}. Current state: ${notice.replaceAll("-", " ")}.`, buttonLabel: "Review live order", buttonUrl: `${process.env.NEXT_PUBLIC_APP_URL || "https://www.socialbooster.net.ng"}/admin/provider` }).catch((error) => console.warn("[cancellation-alert] delivery failed", { orderId: id, error: error instanceof Error ? error.message : "Unknown error" }));
   revalidatePath(`/dashboard/orders/${id}`); revalidatePath("/admin/provider");
   redirect(`/dashboard/orders/${id}?notice=${notice}`);
 }

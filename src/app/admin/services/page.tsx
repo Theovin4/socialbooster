@@ -1,20 +1,22 @@
 import { AppShell } from "@/components/app-shell";
 import { adminDb } from "@/lib/firebase/admin";
 import { isFirestoreQuotaError } from "@/lib/firebase/errors";
+import { isProviderKey, type ProviderKey } from "@/lib/providers";
+import Link from "next/link";
 import { approveService, setServiceActive, setServicePriceOverride, syncAllServices } from "./actions";
 
 export const dynamic = "force-dynamic";
 
-async function loadServices() {
+async function loadServices(providerKey: ProviderKey) {
   try {
     const db = adminDb();
     const [providers, approved] = await Promise.all([
-      db.collection("providerServices").orderBy("categoryName").limit(200).get(),
-      db.collection("services").get(),
+      db.collection("providerServices").where("providerKey", "==", providerKey).limit(200).get(),
+      db.collection("services").where("providerKey", "==", providerKey).get(),
     ]);
     return {
       quotaExhausted: false as const,
-      providers: providers.docs.map((doc) => ({ id: doc.id, data: doc.data() })),
+      providers: providers.docs.map((doc) => ({ id: doc.id, data: doc.data() })).sort((a, b) => String(a.data.categoryName).localeCompare(String(b.data.categoryName))),
       approvedMap: new Map(approved.docs.map((doc) => [doc.id, doc.data()])),
     };
   } catch (error) {
@@ -23,8 +25,10 @@ async function loadServices() {
   }
 }
 
-export default async function AdminServices() {
-  const result = await loadServices();
+export default async function AdminServices({ searchParams }: { searchParams: Promise<{ provider?: string }> }) {
+  const requestedProvider = (await searchParams).provider;
+  const providerKey: ProviderKey = isProviderKey(requestedProvider) ? requestedProvider : "followspanel";
+  const result = await loadServices(providerKey);
   if (result.quotaExhausted) {
     return <AppShell admin><span className="eyebrow">Catalog control</span><h1 style={{ fontSize: 42 }}>Service approvals</h1><div className="glass card" style={{ marginTop: 28 }}><h2>Firebase quota temporarily exhausted</h2><p className="muted">The catalog is safe, but Firebase has paused database access for this project. Upgrade the Firebase project to Blaze or wait for the daily quota to reset, then reload this page.</p></div></AppShell>;
   }
@@ -34,9 +38,14 @@ export default async function AdminServices() {
         <span className="eyebrow">Catalog control</span>
         <h1 style={{ fontSize: 42 }}>Service approvals</h1>
         <p className="muted" style={{ maxWidth: 760, lineHeight: 1.7 }}>
-          Provider synchronization never changes these approval decisions. Review each service carefully before making it visible to customers. Showing the first 200 imported services.
+          Synchronization never changes your approval decisions. Review each service carefully before making it visible to customers. Showing up to 200 services from the selected connection.
         </p>
-        <form action={syncAllServices} style={{ marginTop: 18 }}><button className="btn primary">Synchronize all FollowsPanel services now</button></form>
+        <form action={syncAllServices} style={{ marginTop: 18 }}><button className="btn primary">Synchronize configured providers</button></form>
+        <nav aria-label="Service connection" style={{ display: "flex", flexWrap: "wrap", gap: 10, marginTop: 18 }}>
+          {([["followspanel", "Followpanel"], ["nitro", "Nitro NG"], ["smmworld", "SMM World"]] as const).map(([key, label]) => (
+            <Link className={`btn ${providerKey === key ? "primary" : ""}`} href={`/admin/services?provider=${key}`} key={key}>{label}</Link>
+          ))}
+        </nav>
         <div style={{ display: "grid", gap: 12, marginTop: 28 }}>
           {result.providers.length === 0 ? (
             <div className="glass card"><h2>No provider services found</h2><p className="muted">Run the protected service synchronization first, then refresh this page.</p></div>
@@ -49,7 +58,7 @@ export default async function AdminServices() {
                 <div>
                   <p className="eyebrow" style={{ margin: 0 }}>{provider.categoryName}</p>
                   <h2 style={{ fontSize: 18, margin: "8px 0" }}>{provider.name}</h2>
-                  <p className="muted" style={{ margin: 0 }}>ID {doc.id} · Provider rate NGN {provider.rateText}/1,000 · Min {provider.minQuantity} · Max {provider.maxQuantity} · Refill {provider.refillSupported ? "Yes" : "No"} · Cancel {provider.cancelSupported ? "Yes" : "No"}</p>
+                  <p className="muted" style={{ margin: 0 }}>{provider.providerLabel || "Followpanel"} · ID {provider.providerServiceId || doc.id} · Cost {provider.providerCurrency || "NGN"} {provider.rateText}/1,000 · Min {provider.minQuantity} · Max {provider.maxQuantity} · Refill {provider.refillSupported ? "Yes" : "No"} · Cancel {provider.cancelSupported ? "Yes" : "No"}</p>
                 </div>
                 {local ? (
                   <div style={{ display: "grid", gap: 8, minWidth: 210 }}>
