@@ -5,6 +5,7 @@ import { adminDb } from "@/lib/firebase/admin";
 import { requireUser } from "@/lib/firebase/session";
 import { formatMoney } from "@/lib/money";
 import { synchronizeUserOrders } from "@/lib/order-sync";
+import { customerOrderStatusLabel } from "@/lib/customer-order-status";
 
 export const dynamic = "force-dynamic";
 const filters = [
@@ -196,10 +197,7 @@ export default async function OrdersPage({
                       </td>
                       <td>
                         <span className="status-pill">
-                          {String(item.status || "pending").replaceAll(
-                            "_",
-                            " ",
-                          )}
+                          {customerOrderStatusLabel(item.status)}
                         </span>
                       </td>
                       <td>
@@ -229,7 +227,7 @@ export default async function OrdersPage({
                   <div className="section-head">
                     <strong>#{doc.id.slice(0, 8)}</strong>
                     <span className="status-pill">
-                      {String(item.status || "pending").replaceAll("_", " ")}
+                      {customerOrderStatusLabel(item.status)}
                     </span>
                   </div>
                   <h2>{item.serviceName}</h2>

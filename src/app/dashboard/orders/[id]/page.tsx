@@ -6,6 +6,7 @@ import { adminDb } from "@/lib/firebase/admin";
 import { requireUser } from "@/lib/firebase/session";
 import { formatMoney } from "@/lib/money";
 import { synchronizeOrderDocuments } from "@/lib/order-sync";
+import { customerOrderStatusLabel } from "@/lib/customer-order-status";
 import { requestCancellation, requestRefill } from "../request-actions";
 
 export const dynamic = "force-dynamic";
@@ -120,7 +121,7 @@ export default async function OrderPage({
         <article className="glass card">
           <p className="muted">Status</p>
           <strong style={{ textTransform: "capitalize" }}>
-            {String(order.status).replaceAll("_", " ")}
+            {customerOrderStatusLabel(order.status)}
           </strong>
         </article>
         <article className="glass card">
@@ -194,7 +195,7 @@ export default async function OrderPage({
             Report delivery issue
           </Link>
         </div>
-        {order.cancellationStatus ? <p className="muted" style={{ marginTop: 16 }}>Cancellation status: <strong style={{ textTransform: "capitalize" }}>{String(order.cancellationStatus).replaceAll("_", " ")}</strong>. A request is complete only when the live order status becomes cancelled.</p> : null}
+        {order.cancellationStatus ? <p className="muted" style={{ marginTop: 16 }}>Cancellation status: <strong>{customerOrderStatusLabel(order.cancellationStatus)}</strong>. A request is complete only when the live order status becomes cancelled.</p> : null}
       </div>
     </AppShell>
   );
