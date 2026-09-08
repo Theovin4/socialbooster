@@ -2,10 +2,12 @@ import { createHash } from "node:crypto";
 import { FieldValue } from "firebase-admin/firestore";
 import { adminDb } from "./firebase/admin";
 import { configuredUsdToNgnRateMicros, convertMinor } from "./currency";
-import { configuredMarginBps, decimalToMinor, sellingPriceMinor } from "./money";
+import { DEFAULT_MARGIN_BPS, decimalToMinor, sellingPriceMinor } from "./money";
 import { providerDefinitions, providerServiceDocumentId, type ProviderDefinition } from "./providers";
 
-async function synchronizeProvider(provider: ProviderDefinition) {
+export async function synchronizeProviderServices(providerKey: ProviderDefinition["key"]) {
+  const provider = providerDefinitions().find((item) => item.key === providerKey);
+  if (!provider?.configured) throw new Error(`${provider?.label || providerKey} is not configured`);
   const startedAt = Date.now(), rows = await provider.client.services(), db = adminDb();
   const [providerSnapshot, serviceSnapshot] = await Promise.all([
     provider.key === "followspanel" ? db.collection("providerServices").get() : db.collection("providerServices").where("providerKey", "==", provider.key).get(),
@@ -15,7 +17,7 @@ async function synchronizeProvider(provider: ProviderDefinition) {
   const services = new Map(serviceSnapshot.docs.filter((doc) => provider.key !== "followspanel" || !doc.id.includes("_")).map((doc) => [doc.id, doc.data()]));
   const writer = db.bulkWriter();
   writer.onWriteError((error) => error.failedAttempts < 3);
-  const markupBps = configuredMarginBps(), usdToNgn = configuredUsdToNgnRateMicros();
+  const markupBps = DEFAULT_MARGIN_BPS, usdToNgn = configuredUsdToNgnRateMicros();
   let changed = 0, repriced = 0;
 
   for (const item of rows) {
@@ -30,9 +32,10 @@ async function synchronizeProvider(provider: ProviderDefinition) {
       changed += 1;
     }
     const existing = services.get(id), pricingFingerprint = createHash("sha256").update(JSON.stringify({ ...providerData, providerRateNgnMinor: String(providerRateNgnMinor), markupBps: Number(markupBps) })).digest("hex");
-    if (existing?.pricingFingerprint === pricingFingerprint && existing?.pricingModel === "ngn_markup_v1") continue;
+    const active = provider.key === "followspanel" ? existing?.active === true : true;
+    if (existing?.pricingFingerprint === pricingFingerprint && existing?.pricingModel === "ngn_markup_v1" && existing?.active === active) continue;
     const grossMarginBps = Number((sellingRateMinor - providerRateNgnMinor) * 10000n / sellingRateMinor);
-    writer.set(db.collection("services").doc(id), { ...providerData, providerNativeRateMinor: Number(nativeRateMinor), providerRateMinor: Number(providerRateNgnMinor), providerRateNgnMinor: Number(providerRateNgnMinor), sellingCurrency: "NGN", sellingRateMinor: Number(sellingRateMinor), pricingModel: "ngn_markup_v1", pricingFingerprint, markupBps: Number(markupBps), grossMarginBps, active: existing?.active === true, autoImported: true, customSellingRateMinor: FieldValue.delete(), marginBps: FieldValue.delete(), updatedAt: FieldValue.serverTimestamp(), ...(existing ? {} : { createdAt: FieldValue.serverTimestamp() }) }, { merge: true });
+    writer.set(db.collection("services").doc(id), { ...providerData, providerNativeRateMinor: Number(nativeRateMinor), providerRateMinor: Number(providerRateNgnMinor), providerRateNgnMinor: Number(providerRateNgnMinor), sellingCurrency: "NGN", sellingRateMinor: Number(sellingRateMinor), pricingModel: "ngn_markup_v1", pricingFingerprint, markupBps: Number(markupBps), grossMarginBps, active, autoImported: true, customSellingRateMinor: FieldValue.delete(), marginBps: FieldValue.delete(), updatedAt: FieldValue.serverTimestamp(), ...(existing ? {} : { createdAt: FieldValue.serverTimestamp() }) }, { merge: true });
     changed += 1; repriced += 1;
   }
   await writer.close();
@@ -45,7 +48,7 @@ async function synchronizeProvider(provider: ProviderDefinition) {
 export async function synchronizeAllProviderServices() {
   const providers = providerDefinitions().filter((provider) => provider.configured);
   if (!providers.length) throw new Error("No order provider is configured");
-  const settled = await Promise.allSettled(providers.map(synchronizeProvider));
+  const settled = await Promise.allSettled(providers.map((provider) => synchronizeProviderServices(provider.key)));
   const results = settled.flatMap((item) => item.status === "fulfilled" ? [item.value] : []);
   const failures = settled.flatMap((item, index) => item.status === "rejected" ? [{ provider: providers[index].key, error: item.reason instanceof Error ? item.reason.message : String(item.reason) }] : []);
   for (const failure of failures) {

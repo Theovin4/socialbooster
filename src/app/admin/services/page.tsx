@@ -2,6 +2,7 @@ import { AppShell } from "@/components/app-shell";
 import { adminDb } from "@/lib/firebase/admin";
 import { isFirestoreQuotaError } from "@/lib/firebase/errors";
 import { isProviderKey, type ProviderKey } from "@/lib/providers";
+import { FieldPath } from "firebase-admin/firestore";
 import Link from "next/link";
 import { approveService, setServiceActive, setServicePriceOverride, syncAllServices } from "./actions";
 
@@ -10,14 +11,19 @@ export const dynamic = "force-dynamic";
 async function loadServices(providerKey: ProviderKey) {
   try {
     const db = adminDb();
-    const [providers, approved] = await Promise.all([
+    const legacy = providerKey === "followspanel";
+    const [providers, approved] = await Promise.all(legacy ? [
+      db.collection("providerServices").orderBy(FieldPath.documentId()).limit(250).get(),
+      db.collection("services").orderBy(FieldPath.documentId()).limit(250).get(),
+    ] : [
       db.collection("providerServices").where("providerKey", "==", providerKey).limit(200).get(),
-      db.collection("services").where("providerKey", "==", providerKey).get(),
+      db.collection("services").where("providerKey", "==", providerKey).limit(200).get(),
     ]);
+    const belongs = (id: string, data: FirebaseFirestore.DocumentData) => legacy ? /^\d+$/.test(id) : data.providerKey === providerKey;
     return {
       quotaExhausted: false as const,
-      providers: providers.docs.map((doc) => ({ id: doc.id, data: doc.data() })).sort((a, b) => String(a.data.categoryName).localeCompare(String(b.data.categoryName))),
-      approvedMap: new Map(approved.docs.map((doc) => [doc.id, doc.data()])),
+      providers: providers.docs.filter((doc) => belongs(doc.id, doc.data())).map((doc) => ({ id: doc.id, data: doc.data() })).sort((a, b) => String(a.data.categoryName).localeCompare(String(b.data.categoryName))),
+      approvedMap: new Map(approved.docs.filter((doc) => belongs(doc.id, doc.data())).map((doc) => [doc.id, doc.data()])),
     };
   } catch (error) {
     if (!isFirestoreQuotaError(error)) throw error;
@@ -40,7 +46,7 @@ export default async function AdminServices({ searchParams }: { searchParams: Pr
         <p className="muted" style={{ maxWidth: 760, lineHeight: 1.7 }}>
           Synchronization never changes your approval decisions. Review each service carefully before making it visible to customers. Showing up to 200 services from the selected connection.
         </p>
-        <form action={syncAllServices} style={{ marginTop: 18 }}><button className="btn primary">Synchronize configured providers</button></form>
+        <form action={syncAllServices} style={{ marginTop: 18 }}><input type="hidden" name="provider" value={providerKey} /><button className="btn primary">Synchronize selected connection</button></form>
         <nav aria-label="Service connection" style={{ display: "flex", flexWrap: "wrap", gap: 10, marginTop: 18 }}>
           {([["followspanel", "Followpanel"], ["nitro", "Nitro NG"], ["smmworld", "SMM World"]] as const).map(([key, label]) => (
             <Link className={`btn ${providerKey === key ? "primary" : ""}`} href={`/admin/services?provider=${key}`} key={key}>{label}</Link>

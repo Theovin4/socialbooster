@@ -3,7 +3,7 @@
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { useState } from "react";
-import { Activity, BadgeDollarSign, Bitcoin, ChartNoAxesCombined, ClipboardList, Headphones, Home, Layers3, LogOut, Menu, PlusCircle, ReceiptText, RefreshCcw, ShieldCheck, WalletCards, X } from "lucide-react";
+import { Activity, BadgeDollarSign, Bitcoin, Braces, ChartNoAxesCombined, ClipboardList, Headphones, Home, Layers3, LogOut, Menu, PlusCircle, ReceiptText, RefreshCcw, ShieldCheck, WalletCards, X } from "lucide-react";
 import { Logo } from "./logo";
 
 const customerLinks = [
@@ -15,6 +15,7 @@ const customerLinks = [
   { label: "Mass order", href: "/dashboard/mass-order", icon: Layers3 },
   { label: "Refills", href: "/dashboard/refills", icon: RefreshCcw },
   { label: "Support", href: "/dashboard/support", icon: Headphones },
+  { label: "API", href: "/dashboard/api", icon: Braces },
 ];
 
 const adminLinks = [

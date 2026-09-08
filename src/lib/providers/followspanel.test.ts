@@ -22,6 +22,16 @@ describe("FollowsPanelClient", () => {
     await expect(new FollowsPanelClient("https://provider.test", "secret").services()).rejects.toThrow();
   });
 
+  it("keeps valid services when one catalogue row is malformed", async () => {
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(new Response(JSON.stringify([
+      { service: "12", name: "Video views", type: "Default", rate: 1.25, min: "10", max: "1000", category: "Video" },
+      { service: "bad", name: "Invalid", rate: "free" },
+    ]), { status: 200 })));
+    const services = await new FollowsPanelClient("https://provider.test", "secret").services();
+    expect(services).toHaveLength(1);
+    expect(services[0]).toMatchObject({ service: 12, rate: "1.25", refill: false, cancel: false });
+  });
+
   it("keeps valid live order statuses when another order is unavailable", async () => {
     vi.stubGlobal("fetch", vi.fn().mockResolvedValue(new Response(JSON.stringify({ "101": { status: "In progress", start_count: "517", remains: "120" }, "102": { error: "Incorrect order ID" } }), { status: 200 })));
     const statuses = await new FollowsPanelClient("https://provider.test", "secret").statuses([101, 102]);

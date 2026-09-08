@@ -1,12 +1,16 @@
 import { randomUUID } from "node:crypto";
 import { z } from "zod";
 
-const booleanFlag = z.union([z.boolean(), z.coerce.number().int().min(0).max(1).transform(Boolean)]);
+const booleanFlag = z.union([
+  z.boolean(),
+  z.coerce.number().int().min(0).max(1).transform(Boolean),
+  z.enum(["true", "false"]).transform((value) => value === "true"),
+]).optional().default(false);
 const serviceSchema = z.object({
   service: z.coerce.number().int().positive(),
   name: z.string().min(1),
   type: z.string().min(1),
-  rate: z.string().regex(/^\d+(\.\d+)?$/),
+  rate: z.coerce.string().regex(/^\d+(\.\d+)?$/),
   min: z.coerce.number().int().nonnegative(),
   max: z.coerce.number().int().positive(),
   category: z.string().min(1),
@@ -66,7 +70,17 @@ export class FollowsPanelClient {
     throw new ProviderError(last instanceof Error ? last.message : "Unknown provider error", "NETWORK", true, requestId);
   }
 
-  services() { return this.post("services").then((data) => z.array(serviceSchema).parse(data)); }
+  services() { return this.post("services").then((data) => {
+    const rows = z.array(z.unknown()).parse(data), valid: z.infer<typeof serviceSchema>[] = [];
+    let skipped = 0;
+    for (const row of rows) {
+      const parsed = serviceSchema.safeParse(row);
+      if (parsed.success) valid.push(parsed.data); else skipped += 1;
+    }
+    if (!valid.length && rows.length) throw new ProviderError("The service catalogue format is not supported", "INVALID_CATALOGUE");
+    if (skipped) console.warn("[followspanel] skipped invalid catalogue rows", { skipped, received: rows.length });
+    return valid;
+  }); }
   balance() { return this.post("balance").then((data) => z.object({ balance: z.string(), currency: z.string() }).parse(data)); }
   add(serviceId: number, link: string, quantity: number) { return this.post("add", { service: String(serviceId), link, quantity: String(quantity) }, false).then((data) => z.object({ order: z.coerce.number().int().positive() }).parse(data)); }
   status(orderId: number) { return this.post("status", { order: String(orderId) }).then((data) => statusSchema.parse(data)); }
