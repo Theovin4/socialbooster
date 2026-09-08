@@ -1,0 +1,40 @@
+.portal-desktop-actions {
+  display: flex;
+  justify-content: flex-end;
+  margin-bottom: 10px;
+}
+
+.portal-header-actions {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+}
+
+.portal-top-logout {
+  min-height: 42px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  padding: 0 15px;
+  border: 1px solid rgba(240, 166, 184, .28);
+  border-radius: 12px;
+  background: rgba(240, 166, 184, .07);
+  color: #f4b4c4;
+  font-weight: 800;
+  cursor: pointer;
+}
+
+.portal-top-logout:hover {
+  border-color: rgba(240, 166, 184, .6);
+  background: rgba(240, 166, 184, .12);
+}
+
+@media (max-width: 900px) {
+  .portal-desktop-actions { display: none; }
+}
+
+@media (max-width: 620px) {
+  .portal-top-logout { padding-inline: 11px; }
+  .portal-top-logout span { display: none; }
+}

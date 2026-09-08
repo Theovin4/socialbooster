@@ -35,7 +35,7 @@ export function ConsentManager() {
     setConsent(next);
     setOpen(false);
   }
-  if (consent === undefined) return null;
+  if (consent === undefined || privatePage) return null;
   const chooser = consent === null || open;
   return <>
     {!privatePage && consent?.analytics ? <><Script src="https://www.googletagmanager.com/gtag/js?id=G-NEZPXRW3M4" strategy="afterInteractive" /><Script id="social-booster-google-analytics" strategy="afterInteractive">{`window.dataLayer=window.dataLayer||[];function gtag(){dataLayer.push(arguments);}gtag('js',new Date());gtag('config','G-NEZPXRW3M4',{anonymize_ip:true});`}</Script></> : null}
