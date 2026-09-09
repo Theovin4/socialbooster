@@ -7,6 +7,15 @@ import Link from "next/link";
 import { approveService, setServiceActive, setServicePriceOverride, syncAllServices } from "./actions";
 
 export const dynamic = "force-dynamic";
+export const maxDuration = 300;
+
+const syncMessages: Record<string, { title: string; body: string; color: string }> = {
+  success: { title: "Synchronization complete", body: "The service catalogue, counts and customer prices have been updated.", color: "#86efac" },
+  quota: { title: "Firebase limit reached", body: "Your existing services are safe. Wait for the daily Firebase allowance to reset, then try again.", color: "#fbbf24" },
+  timeout: { title: "Connection timed out", body: "The connection responded too slowly. Existing services remain available and the scheduled synchronization can retry later.", color: "#fbbf24" },
+  format: { title: "Catalogue response needs attention", body: "The connection returned an unexpected service list. Existing services remain available.", color: "#fbbf24" },
+  failed: { title: "Synchronization did not finish", body: "No existing services were removed. Please try once more or check Live Orders for the connection status.", color: "#fca5a5" },
+};
 
 async function loadServices(providerKey: ProviderKey) {
   try {
@@ -31,8 +40,9 @@ async function loadServices(providerKey: ProviderKey) {
   }
 }
 
-export default async function AdminServices({ searchParams }: { searchParams: Promise<{ provider?: string }> }) {
-  const requestedProvider = (await searchParams).provider;
+export default async function AdminServices({ searchParams }: { searchParams: Promise<{ provider?: string; sync?: string }> }) {
+  const input = await searchParams;
+  const requestedProvider = input.provider;
   const providerKey: ProviderKey = isProviderKey(requestedProvider) ? requestedProvider : "followspanel";
   const result = await loadServices(providerKey);
   if (result.quotaExhausted) {
@@ -46,6 +56,7 @@ export default async function AdminServices({ searchParams }: { searchParams: Pr
         <p className="muted" style={{ maxWidth: 760, lineHeight: 1.7 }}>
           Synchronization never changes your approval decisions. Review each service carefully before making it visible to customers. Showing up to 200 services from the selected connection.
         </p>
+        {input.sync && syncMessages[input.sync] ? <div className="glass card" role="status" style={{ marginTop: 18, borderColor: syncMessages[input.sync].color }}><strong style={{ color: syncMessages[input.sync].color }}>{syncMessages[input.sync].title}</strong><p className="muted" style={{ marginBottom: 0 }}>{syncMessages[input.sync].body}</p></div> : null}
         <form action={syncAllServices} style={{ marginTop: 18 }}><input type="hidden" name="provider" value={providerKey} /><button className="btn primary">Synchronize selected connection</button></form>
         <nav aria-label="Service connection" style={{ display: "flex", flexWrap: "wrap", gap: 10, marginTop: 18 }}>
           {([["followspanel", "Followpanel"], ["nitro", "Nitro NG"], ["smmworld", "SMM World"]] as const).map(([key, label]) => (

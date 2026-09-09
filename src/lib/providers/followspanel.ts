@@ -8,12 +8,12 @@ const booleanFlag = z.union([
 ]).optional().default(false);
 const serviceSchema = z.object({
   service: z.coerce.number().int().positive(),
-  name: z.string().min(1),
-  type: z.string().min(1),
-  rate: z.coerce.string().regex(/^\d+(\.\d+)?$/),
-  min: z.coerce.number().int().nonnegative(),
+  name: z.string().trim().min(1),
+  type: z.string().trim().min(1).optional().default("Default"),
+  rate: z.preprocess((value) => String(value ?? "").replaceAll(",", "").trim(), z.string().regex(/^\d+(\.\d+)?$/)),
+  min: z.coerce.number().int().nonnegative().optional().default(1),
   max: z.coerce.number().int().positive(),
-  category: z.string().min(1),
+  category: z.string().trim().min(1).optional().default("Other services"),
   refill: booleanFlag,
   cancel: booleanFlag,
 }).refine((value) => value.max >= value.min, "Maximum must be greater than or equal to minimum");
@@ -71,7 +71,10 @@ export class FollowsPanelClient {
   }
 
   services() { return this.post("services").then((data) => {
-    const rows = z.array(z.unknown()).parse(data), valid: z.infer<typeof serviceSchema>[] = [];
+    const payload = data && typeof data === "object" && !Array.isArray(data)
+      ? ((data as { services?: unknown; data?: unknown }).services ?? (data as { data?: unknown }).data)
+      : data;
+    const rows = z.array(z.unknown()).parse(payload), valid: z.infer<typeof serviceSchema>[] = [];
     let skipped = 0;
     for (const row of rows) {
       const parsed = serviceSchema.safeParse(row);

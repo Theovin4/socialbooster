@@ -4,6 +4,7 @@ import { adminDb } from "@/lib/firebase/admin";
 import { requireAdmin } from "@/lib/firebase/session";
 import { normalizeProviderKey, providerDefinitions } from "@/lib/providers";
 import { formatMoney } from "@/lib/money";
+import { FieldPath } from "firebase-admin/firestore";
 import { refreshLiveOrders, refundOrder, retryCancellation } from "./actions";
 
 export const dynamic = "force-dynamic";
@@ -21,11 +22,16 @@ export default async function ProviderHealthPage({ searchParams }: { searchParam
   const providers = providerDefinitions();
   const health = await Promise.all(providers.map(async (provider) => {
     if (!provider.configured) return { ...provider, connected: false as const, balance: null, serviceCount: 0 };
-    const [balance, syncState] = await Promise.all([
+    const catalogueQuery = provider.key === "followspanel"
+      ? db.collection("providerServices").where(FieldPath.documentId(), ">=", "0").where(FieldPath.documentId(), "<=", `9\uf8ff`)
+      : db.collection("providerServices").where("providerKey", "==", provider.key);
+    const [balance, catalogueCount, syncState] = await Promise.all([
       provider.client.balance().catch(() => null),
+      catalogueQuery.count().get().catch(() => null),
       db.collection("providerSyncState").doc(provider.key).get().catch(() => null),
     ]);
-    return { ...provider, connected: Boolean(balance), balance, serviceCount: Number(syncState?.get("serviceCount") || 0) };
+    const storedCount = Number(catalogueCount?.data().count || 0);
+    return { ...provider, connected: Boolean(balance), balance, serviceCount: storedCount || Number(syncState?.get("serviceCount") || 0) };
   }));
   const statusGroups = new Map<string, number[]>();
   for (const order of orders) {

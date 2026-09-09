@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import { FieldValue } from "firebase-admin/firestore";
+import { FieldPath, FieldValue } from "firebase-admin/firestore";
 import { adminDb } from "./firebase/admin";
 import { configuredUsdToNgnRateMicros, convertMinor } from "./currency";
 import { DEFAULT_MARGIN_BPS, decimalToMinor, sellingPriceMinor } from "./money";
@@ -9,9 +9,17 @@ export async function synchronizeProviderServices(providerKey: ProviderDefinitio
   const provider = providerDefinitions().find((item) => item.key === providerKey);
   if (!provider?.configured) throw new Error(`${provider?.label || providerKey} is not configured`);
   const startedAt = Date.now(), rows = await provider.client.services(), db = adminDb();
+  const providerCatalogue = db.collection("providerServices");
+  const customerCatalogue = db.collection("services");
+  const providerQuery = provider.key === "followspanel"
+    ? providerCatalogue.where(FieldPath.documentId(), ">=", "0").where(FieldPath.documentId(), "<=", `9\uf8ff`)
+    : providerCatalogue.where("providerKey", "==", provider.key);
+  const serviceQuery = provider.key === "followspanel"
+    ? customerCatalogue.where(FieldPath.documentId(), ">=", "0").where(FieldPath.documentId(), "<=", `9\uf8ff`)
+    : customerCatalogue.where("providerKey", "==", provider.key);
   const [providerSnapshot, serviceSnapshot] = await Promise.all([
-    provider.key === "followspanel" ? db.collection("providerServices").get() : db.collection("providerServices").where("providerKey", "==", provider.key).get(),
-    provider.key === "followspanel" ? db.collection("services").get() : db.collection("services").where("providerKey", "==", provider.key).get(),
+    providerQuery.get(),
+    serviceQuery.get(),
   ]);
   const providers = new Map(providerSnapshot.docs.filter((doc) => provider.key !== "followspanel" || !doc.id.includes("_")).map((doc) => [doc.id, doc.data()]));
   const services = new Map(serviceSnapshot.docs.filter((doc) => provider.key !== "followspanel" || !doc.id.includes("_")).map((doc) => [doc.id, doc.data()]));

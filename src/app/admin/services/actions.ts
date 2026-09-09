@@ -1,6 +1,7 @@
 "use server";
 import { FieldValue } from "firebase-admin/firestore";
 import { revalidatePath } from "next/cache";
+import { redirect } from "next/navigation";
 import { adminDb } from "@/lib/firebase/admin";
 import { requireAdmin } from "@/lib/firebase/session";
 import { DEFAULT_MARGIN_BPS, decimalToMinor, sellingPriceMinor } from "@/lib/money";
@@ -14,9 +15,23 @@ export async function syncAllServices(formData: FormData) {
   await requireAdmin();
   const provider = String(formData.get("provider") || "followspanel");
   if (!isProviderKey(provider)) throw new Error("Invalid provider");
+  let outcome = "success";
   try { await synchronizeProviderServices(provider); }
-  catch (error) { console.error("[admin:services-sync] failed", { error: error instanceof Error ? error.message : String(error), stack: error instanceof Error ? error.stack : undefined }); throw new Error("Service synchronization failed. Check the production logs for the recorded cause."); }
+  catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    console.error("[admin:services-sync] failed", { provider, error: message, stack: error instanceof Error ? error.stack : undefined });
+    const normalized = message.toLowerCase();
+    outcome = normalized.includes("quota") || normalized.includes("resource_exhausted")
+      ? "quota"
+      : normalized.includes("abort") || normalized.includes("timeout")
+        ? "timeout"
+        : normalized.includes("catalogue format")
+          ? "format"
+          : "failed";
+  }
   revalidatePath(`/admin/services?provider=${provider}`); revalidatePath("/services");
+  revalidatePath("/admin/provider");
+  redirect(`/admin/services?provider=${provider}&sync=${outcome}`);
 }
 
 export async function approveService(formData: FormData) {
