@@ -47,7 +47,7 @@ export class FollowsPanelClient {
 
     for (let attempt = 0; attempt < attempts; attempt += 1) {
       const controller = new AbortController();
-      const timer = setTimeout(() => controller.abort(), 10_000);
+      const timer = setTimeout(() => controller.abort(), action === "services" ? 30_000 : 10_000);
       try {
         const response = await fetch(this.url, { method: "POST", headers: { "content-type": "application/x-www-form-urlencoded", "x-request-id": requestId }, body: new URLSearchParams({ key: this.key, action, ...input }), signal: controller.signal, cache: "no-store" });
         if (!response.ok) throw new ProviderError(`Provider HTTP ${response.status}`, "HTTP", response.status >= 500, requestId);

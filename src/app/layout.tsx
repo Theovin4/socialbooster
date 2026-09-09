@@ -1,5 +1,6 @@
 import type { Metadata, Viewport } from "next";
 import { ConsentManager } from "@/components/consent-manager";
+import { SupportAssistant } from "@/components/support-assistant";
 import "./globals.css";
 
 const siteUrl = "https://www.socialbooster.net.ng";
@@ -25,5 +26,5 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
     { "@type": "Organization", "@id": `${siteUrl}/#organization`, name: "Social Booster", legalName: "Elysium Enterprise", url: siteUrl, logo: `${siteUrl}/icon-512.png`, email: "support@socialbooster.net.ng", address: { "@type": "PostalAddress", addressLocality: "Lagos", addressCountry: "NG" }, contactPoint: { "@type": "ContactPoint", contactType: "customer support", email: "support@socialbooster.net.ng", availableLanguage: "English", areaServed: "Africa" }, areaServed: [{ "@type": "Country", name: "Nigeria" }, { "@type": "Continent", name: "Africa" }] },
     { "@type": "WebSite", "@id": `${siteUrl}/#website`, url: siteUrl, name: "Social Booster Nigeria", inLanguage: "en-NG", publisher: { "@id": `${siteUrl}/#organization` }, potentialAction: { "@type": "SearchAction", target: `${siteUrl}/services?q={search_term_string}`, "query-input": "required name=search_term_string" } },
   ] };
-  return <html lang="en-NG"><body><script type="application/ld+json" dangerouslySetInnerHTML={{ __html: JSON.stringify(structuredData).replace(/</g, "\\u003c") }} /><ConsentManager />{children}</body></html>;
+  return <html lang="en-NG"><body><script type="application/ld+json" dangerouslySetInnerHTML={{ __html: JSON.stringify(structuredData).replace(/</g, "\\u003c") }} /><ConsentManager />{children}<SupportAssistant /></body></html>;
 }

@@ -12,9 +12,10 @@ function ticketLabel(status: string, lastSender: string) {
   return "With support";
 }
 
-export default async function SupportPage({ searchParams }: { searchParams: Promise<{ order?: string; view?: string }> }) {
+export default async function SupportPage({ searchParams }: { searchParams: Promise<{ order?: string; view?: string; draft?: string }> }) {
   const user = await requireUser();
-  const { order = "", view = "open" } = await searchParams;
+  const { order = "", view = "open", draft = "" } = await searchParams;
+  const messageDraft = draft.trim().slice(0, 1000);
   const snapshot = await adminDb().collection("supportTickets").where("userId", "==", user.uid).limit(100).get();
   const allTickets = snapshot.docs.sort((a, b) => (b.get("updatedAt")?.toMillis?.() || b.get("createdAt")?.toMillis?.() || 0) - (a.get("updatedAt")?.toMillis?.() || a.get("createdAt")?.toMillis?.() || 0));
   const openCount = allTickets.filter((item) => item.get("status") !== "closed").length;
@@ -34,8 +35,8 @@ export default async function SupportPage({ searchParams }: { searchParams: Prom
         <h2>New conversation</h2>
         <form action={createSupportTicket} encType="multipart/form-data" style={{ display: "grid", gap: 16 }}>
           <label>Order ID <span className="muted">(optional)</span><input className="field" name="orderId" defaultValue={order} /></label>
-          <label>Subject<input className="field" name="subject" required minLength={5} maxLength={120} defaultValue={order ? "Order delivery issue" : ""} placeholder="Summarise the issue" /></label>
-          <label>Message<textarea className="field" name="message" required minLength={15} maxLength={3000} rows={6} defaultValue={order ? "Please review this order. The delivery shown in my account does not match what I received." : ""} placeholder="Include the relevant details and what you need help with." /></label>
+          <label>Subject<input className="field" name="subject" required minLength={5} maxLength={120} defaultValue={order ? "Order delivery issue" : messageDraft ? "Support request" : ""} placeholder="Summarise the issue" /></label>
+          <label>Message<textarea className="field" name="message" required minLength={15} maxLength={3000} rows={6} defaultValue={order ? "Please review this order. The delivery shown in my account does not match what I received." : messageDraft} placeholder="Include the relevant details and what you need help with." /></label>
           <label>Supporting files <span className="muted">(optional)</span><input className="field" type="file" name="attachments" accept=".jpg,.jpeg,.png,.webp,.pdf,.txt" multiple /><small className="muted">Up to 3 JPG, PNG, WebP, PDF or TXT files; 700 KB each and 2 MB total. Never upload passwords, PINs, CVVs or OTPs.</small></label>
           <button className="btn primary" type="submit">Send message</button>
         </form>
