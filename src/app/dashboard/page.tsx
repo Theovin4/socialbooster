@@ -2,7 +2,8 @@ import Link from "next/link";
 import { ArrowUpRight, ClipboardList, PlusCircle, WalletCards } from "lucide-react";
 import { AppShell } from "@/components/app-shell";
 import { Toast } from "@/components/toast";
-import { adminDb } from "@/lib/firebase/admin";
+import { VerificationNotice } from "@/components/verification-notice";
+import { adminAuth, adminDb } from "@/lib/firebase/admin";
 import { requireUser } from "@/lib/firebase/session";
 import { formatMoney } from "@/lib/money";
 
@@ -11,7 +12,8 @@ export const dynamic = "force-dynamic";
 export default async function Dashboard({ searchParams }: { searchParams: Promise<{ notice?: string }> }) {
   const user = await requireUser();
   const { notice } = await searchParams;
-  const firstName = user.name?.trim().split(/\s+/)[0] || "there";
+  const account = await adminAuth().getUser(user.uid).catch(() => null);
+  const firstName = account?.displayName?.trim().split(/\s+/)[0] || user.name?.trim().split(/\s+/)[0] || "there";
   let dataAvailable = true;
   let walletData: FirebaseFirestore.DocumentData = {};
   let orderDocs: FirebaseFirestore.QueryDocumentSnapshot[] = [];
@@ -35,8 +37,9 @@ export default async function Dashboard({ searchParams }: { searchParams: Promis
   const cards = [["Available balance", formatMoney(BigInt(available), currency), WalletCards], ["Active orders", String(active), ClipboardList], ["Completed orders", String(completed), ArrowUpRight]] as const;
 
   return <AppShell>
-    {notice === "welcome" ? <Toast kind="success" title={`Welcome, ${firstName}`} message="Signed in successfully." /> : null}
+    {notice === "welcome" ? <Toast kind="success" title={`Welcome, ${firstName}`} message="Signed in successfully." /> : notice === "account-created" ? <Toast kind="success" title={`Welcome, ${firstName}`} message="Your account is ready to use. Please verify your email when convenient." /> : null}
     <h1 className="page-heading">Welcome back, {firstName}.</h1>
+    {account && !account.emailVerified ? <VerificationNotice /> : null}
     {!dataAvailable ? <div className="notice" style={{ marginBottom: 22 }}><strong>Your account is signed in.</strong><p className="muted" style={{ marginBottom: 0 }}>Account data is temporarily unavailable. Please refresh in a few minutes. Your wallet and orders remain safe.</p></div> : null}
     <div className="grid3">{cards.map(([label, value, Icon]) => <article className="glass card stat-card" key={label}><div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}><span className="muted">{label}</span><Icon size={20} color="#63d9ff" /></div><strong className="stat-value">{value}</strong></article>)}</div>
     <div className="form-grid" style={{ marginTop: 22 }}>

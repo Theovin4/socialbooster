@@ -22,6 +22,10 @@ export async function POST(request: Request) {
   let event: ReceivedEvent;
   try { event = new Webhook(secret).verify(payload, { "svix-id": id, "svix-timestamp": timestamp, "svix-signature": signature }) as ReceivedEvent; }
   catch { return new Response("Invalid webhook signature", { status: 400 }); }
+  if (event.type.startsWith("email.") && event.type !== "email.received" && event.data?.email_id) {
+    await adminDb().collection("emailDeliveries").doc(event.data.email_id).set({ status: event.type.replace("email.", ""), lastEventId: id, updatedAt: FieldValue.serverTimestamp() }, { merge: true });
+    return Response.json({ received: true });
+  }
   if (event.type !== "email.received" || !event.data?.email_id) return Response.json({ received: true });
 
   const db = adminDb(), ref = db.collection("supportTickets").doc(`resend-${event.data.email_id}`);

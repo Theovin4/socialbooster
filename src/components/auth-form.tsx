@@ -17,7 +17,6 @@ function messageFor(error: unknown, mode: "login" | "register" | "reset"): Notic
   if (code === "auth/weak-password") return { kind: "error", title: "Choose a stronger password", message: "Use at least 10 characters with a mix of letters, numbers and symbols." };
   if (code === "auth/invalid-email") return { kind: "error", title: "Check your email", message: "Enter a valid email address and try again." };
   if (code === "auth/too-many-requests") return { kind: "error", title: "Please wait before retrying", message: "Too many attempts were made. Wait a few minutes or reset your password." };
-  if (error instanceof Error && error.message === "EMAIL_NOT_VERIFIED") return { kind: "info", title: "Verify your email first", message: "Open the activation email and click the verification link. If it is not in your Inbox, check Spam, Junk or Promotions and mark it as Not spam." };
   return { kind: "error", title: mode === "login" ? "Unable to sign in" : mode === "register" ? "Unable to register" : "Unable to continue", message: "Check your connection and try again." };
 }
 
@@ -36,10 +35,18 @@ export function AuthForm({ mode, initialNotice }: { mode: "login" | "register" |
         if (!firstName || !lastName) throw new Error("FULL_NAME_REQUIRED");
         const credential = await createUserWithEmailAndPassword(auth, email, password);
         await updateProfile(credential.user, { displayName: `${firstName} ${lastName}` });
-        const branded = await fetch("/api/auth/email", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ type: "verification", email, idToken: await credential.user.getIdToken(true) }) }); if (!branded.ok) await sendEmailVerification(credential.user, actionSettings); await auth.signOut(); router.push("/login?notice=verify-email"); return;
+        const idToken = await credential.user.getIdToken(true);
+        try { const branded = await fetch("/api/auth/email", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ type: "verification", email, idToken }) }); if (!branded.ok) await sendEmailVerification(credential.user, actionSettings); }
+        catch { await sendEmailVerification(credential.user, actionSettings).catch(() => undefined); }
+        const response = await fetch("/api/auth/session", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ idToken }) });
+        if (!response.ok) throw new Error("SESSION_FAILED");
+        await auth.signOut(); router.push("/dashboard?notice=account-created"); router.refresh(); return;
       }
       const credential = await signInWithEmailAndPassword(auth, email, password);
-      if (!credential.user.emailVerified) { await auth.signOut(); throw new Error("EMAIL_NOT_VERIFIED"); }
+      if (!credential.user.emailVerified) {
+        try { const branded = await fetch("/api/auth/email", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ type: "verification", email, idToken: await credential.user.getIdToken(true) }) }); if (!branded.ok) await sendEmailVerification(credential.user, actionSettings); }
+        catch { await sendEmailVerification(credential.user, actionSettings).catch(() => undefined); }
+      }
       const response = await fetch("/api/auth/session", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ idToken: await credential.user.getIdToken(true) }) });
       if (!response.ok) throw new Error("SESSION_FAILED");
       const session = await response.json() as { admin?: boolean }; await auth.signOut(); router.push(session.admin ? "/admin?notice=welcome" : "/dashboard?notice=welcome"); router.refresh();

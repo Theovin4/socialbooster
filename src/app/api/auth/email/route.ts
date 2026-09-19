@@ -18,12 +18,17 @@ export async function POST(request: Request) {
       const token = await adminAuth().verifyIdToken(input.idToken, true);
       if (token.email?.toLowerCase() !== input.email.toLowerCase()) return Response.json({ error: "Unauthorized" }, { status: 401 });
       const link = await adminAuth().generateEmailVerificationLink(input.email, { url: `${app}/login`, handleCodeInApp: false });
-      await sendBrandedEmail({ to: input.email, subject: "Verify your Social Booster account", html: brandedEmail({ title: "Confirm your email address", preview: "Activate your Social Booster account", message: "Welcome to Social Booster. Confirm this email address to activate your customer account and sign in securely.", buttonLabel: "Verify my email", buttonUrl: link }) });
+      const delivery = await sendBrandedEmail({ to: input.email, subject: "Verify your Social Booster email", html: brandedEmail({ title: "Confirm your email address", preview: "Secure your active Social Booster account", message: "Welcome to Social Booster. Your account is ready to use. Confirm this email address to secure account recovery and receive important service updates.", buttonLabel: "Verify my email", buttonUrl: link }), idempotencyKey: `account-verification-${token.uid}-${Math.floor(Date.now() / 60_000)}` });
+      await adminDb().collection("emailDeliveries").doc(delivery.id).set({ userId: token.uid, recipientHash: createHash("sha256").update(input.email.toLowerCase()).digest("hex"), type: "verification", status: "accepted", createdAt: FieldValue.serverTimestamp() }).catch((error) => console.warn("[auth-email] delivery audit unavailable", { emailId: delivery.id, error: error instanceof Error ? error.message : "Unknown error" }));
     } else {
       const link = await adminAuth().generatePasswordResetLink(input.email, { url: `${app}/login`, handleCodeInApp: false });
-      await sendBrandedEmail({ to: input.email, subject: "Reset your Social Booster password", html: brandedEmail({ title: "Reset your password", preview: "Secure password reset request", message: "We received a request to reset your Social Booster password. If you did not request this, you can safely ignore this email.", buttonLabel: "Reset password", buttonUrl: link }) });
+      const delivery = await sendBrandedEmail({ to: input.email, subject: "Reset your Social Booster password", html: brandedEmail({ title: "Reset your password", preview: "Secure password reset request", message: "We received a request to reset your Social Booster password. If you did not request this, you can safely ignore this email.", buttonLabel: "Reset password", buttonUrl: link }), idempotencyKey: `password-reset-${key}-${Math.floor(Date.now() / 60_000)}` });
+      await adminDb().collection("emailDeliveries").doc(delivery.id).set({ recipientHash: createHash("sha256").update(input.email.toLowerCase()).digest("hex"), type: "reset", status: "accepted", createdAt: FieldValue.serverTimestamp() }).catch((error) => console.warn("[auth-email] delivery audit unavailable", { emailId: delivery.id, error: error instanceof Error ? error.message : "Unknown error" }));
     }
     await rateRef.set({ sentAt: FieldValue.serverTimestamp(), type: input.type }, { merge: true });
-  } catch (error) { console.warn("[auth-email] request not delivered", { type: input.type, error: error instanceof Error ? error.message : "Unknown error" }); }
+  } catch (error) {
+    console.error("[auth-email] request not delivered", { type: input.type, error: error instanceof Error ? error.message : "Unknown error" });
+    return Response.json({ error: "Branded email delivery is temporarily unavailable" }, { status: 502 });
+  }
   return Response.json({ ok: true });
 }
