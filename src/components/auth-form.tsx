@@ -25,7 +25,7 @@ export function AuthForm({ mode, initialNotice }: { mode: "login" | "register" |
   function checkCaps(event: KeyboardEvent<HTMLInputElement>) { setCapsLock(event.getModifierState("CapsLock")); }
   async function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault(); setBusy(true); setNotice(undefined);
-    const data = new FormData(event.currentTarget), email = String(data.get("email") || "").trim(), password = String(data.get("password") || ""), firstName = String(data.get("firstName") || "").trim(), lastName = String(data.get("lastName") || "").trim();
+    const data = new FormData(event.currentTarget), email = String(data.get("email") || "").trim().toLowerCase(), password = String(data.get("password") || ""), firstName = String(data.get("firstName") || "").trim(), lastName = String(data.get("lastName") || "").trim();
     try {
       const auth = firebaseAuth();
       const actionSettings = { url: `${window.location.origin}/login`, handleCodeInApp: false };

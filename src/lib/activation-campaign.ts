@@ -21,15 +21,16 @@ export async function sendRecentActivationEmails() {
   for (let index = 0; index < users.length; index += 10) {
     await Promise.all(users.slice(index, index + 10).map(async (user) => {
       const campaignRef = adminDb().collection("activationCampaigns").doc(`recent_${user.uid}`);
-      const previous = await campaignRef.get();
-      if (previous.exists && previous.get("status") === "sent") { skipped += 1; return; }
       try {
+        const previous = await campaignRef.get();
+        if (previous.exists && previous.get("status") === "sent") { skipped += 1; return; }
         const link = await adminAuth().generateEmailVerificationLink(user.email, { url: `${appUrl}/dashboard`, handleCodeInApp: false });
         const delivery = await sendBrandedEmail({ to: user.email, subject: "Confirm your Social Booster email", idempotencyKey: `recent-activation-${user.uid}`, html: brandedEmail({ title: "Confirm your email", preview: "Secure your active Social Booster account", message: "Your Social Booster account is active and ready to use. Confirm your email address to secure account recovery and receive important service updates.", buttonLabel: "Confirm email", buttonUrl: link }) });
         await campaignRef.set({ userId: user.uid, emailId: delivery.id, status: "sent", sentAt: FieldValue.serverTimestamp() });
         sent += 1;
       } catch (error) {
         failed += 1;
+        console.error("[activation-campaign] customer delivery failed", { userId: user.uid, error: error instanceof Error ? error.message : "Unknown error" });
         await campaignRef.set({ userId: user.uid, status: "failed", error: error instanceof Error ? error.message : "Unknown error", updatedAt: FieldValue.serverTimestamp() }, { merge: true }).catch(() => undefined);
       }
     }));

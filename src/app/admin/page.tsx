@@ -7,6 +7,7 @@ import { formatMoney } from "@/lib/money";
 import { sendActivationRecovery } from "./actions";
 
 export const dynamic = "force-dynamic";
+export const maxDuration = 300;
 
 const periods = { "7": "Last 7 days", "30": "Last 30 days", "90": "Last 90 days", "365": "Last 12 months", all: "All time" } as const;
 type Period = keyof typeof periods;
