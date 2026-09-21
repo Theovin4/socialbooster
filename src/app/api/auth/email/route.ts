@@ -17,7 +17,7 @@ export async function POST(request: Request) {
       if (!input.idToken) return Response.json({ error: "Unauthorized" }, { status: 401 });
       const token = await adminAuth().verifyIdToken(input.idToken, true);
       if (token.email?.toLowerCase() !== input.email.toLowerCase()) return Response.json({ error: "Unauthorized" }, { status: 401 });
-      const link = await adminAuth().generateEmailVerificationLink(input.email, { url: `${app}/login`, handleCodeInApp: false });
+      const link = await adminAuth().generateEmailVerificationLink(input.email);
       const delivery = await sendBrandedEmail({ to: input.email, subject: "Verify your Social Booster email", html: brandedEmail({ title: "Confirm your email address", preview: "Secure your active Social Booster account", message: "Welcome to Social Booster. Your account is ready to use. Confirm this email address to secure account recovery and receive important service updates.", buttonLabel: "Verify my email", buttonUrl: link }), idempotencyKey: `account-verification-${token.uid}-${Math.floor(Date.now() / 60_000)}` });
       await adminDb().collection("emailDeliveries").doc(delivery.id).set({ userId: token.uid, recipientHash: createHash("sha256").update(input.email.toLowerCase()).digest("hex"), type: "verification", status: "accepted", createdAt: FieldValue.serverTimestamp() }).catch((error) => console.warn("[auth-email] delivery audit unavailable", { emailId: delivery.id, error: error instanceof Error ? error.message : "Unknown error" }));
     } else {

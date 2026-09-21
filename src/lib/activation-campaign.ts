@@ -24,7 +24,7 @@ export async function sendRecentActivationEmails() {
       try {
         const previous = await campaignRef.get();
         if (previous.exists && previous.get("status") === "sent") { skipped += 1; return; }
-        const link = await adminAuth().generateEmailVerificationLink(user.email, { url: `${appUrl}/dashboard`, handleCodeInApp: false });
+        const link = await adminAuth().generateEmailVerificationLink(user.email);
         const delivery = await sendBrandedEmail({ to: user.email, subject: "Confirm your Social Booster email", idempotencyKey: `recent-activation-${user.uid}`, html: brandedEmail({ title: "Confirm your email", preview: "Secure your active Social Booster account", message: "Your Social Booster account is active and ready to use. Confirm your email address to secure account recovery and receive important service updates.", buttonLabel: "Confirm email", buttonUrl: link }) });
         await campaignRef.set({ userId: user.uid, emailId: delivery.id, status: "sent", sentAt: FieldValue.serverTimestamp() });
         sent += 1;

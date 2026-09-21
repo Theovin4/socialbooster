@@ -1,4 +1,4 @@
-import {cookies,headers} from "next/headers";import {after} from "next/server";import {z} from "zod";import {FieldValue} from "firebase-admin/firestore";import {adminAuth,adminDb} from "@/lib/firebase/admin";import {SESSION_COOKIE} from "@/lib/firebase/session";import {sendAdminAlert} from "@/lib/email";
+import {cookies,headers} from "next/headers";import {after} from "next/server";import {z} from "zod";import {FieldValue} from "firebase-admin/firestore";import {adminAuth,adminDb} from "@/lib/firebase/admin";import {ensureApplicationUser} from "@/lib/firebase/application-user";import {SESSION_COOKIE} from "@/lib/firebase/session";import {sendAdminAlert} from "@/lib/email";
 const bodySchema=z.object({idToken:z.string().min(100)}),MAX_AGE=60*60*24*5;
 function trustedOrigin(origin:string|null){if(!origin)return false;try{const url=new URL(origin),app=new URL(process.env.NEXT_PUBLIC_APP_URL||"http://localhost:3000");return url.origin===app.origin||url.hostname==="localhost"}catch{return false}}
 async function notifyNewSignup(uid:string,email?:string,name?:string){
@@ -14,7 +14,7 @@ export async function POST(request:Request){
     if(Date.now()/1000-decoded.auth_time>300)return Response.json({error:"Recent sign-in required"},{status:401});
     const session=await adminAuth().createSessionCookie(idToken,{expiresIn:MAX_AGE*1000});
     (await cookies()).set(SESSION_COOKIE,session,{httpOnly:true,secure:process.env.NODE_ENV==="production",sameSite:"lax",path:"/",maxAge:MAX_AGE});
-    after(()=>notifyNewSignup(decoded.uid,decoded.email,decoded.name));
+    after(async()=>{const results=await Promise.allSettled([ensureApplicationUser(decoded),notifyNewSignup(decoded.uid,decoded.email,decoded.name)]);for(const result of results)if(result.status==="rejected")console.error("[auth:session] post-login bootstrap failed",{userId:decoded.uid,error:result.reason instanceof Error?result.reason.message:"Unknown error"})});
     return Response.json({ok:true,admin:decoded.admin===true,emailVerified:decoded.email_verified===true});
   }catch{return Response.json({error:"Authentication failed"},{status:401})}
 }
