@@ -21,8 +21,10 @@ function messageFor(error: unknown, mode: "login" | "register" | "reset"): Notic
   if (code === "auth/popup-blocked") return { kind: "error", title: "Google window was blocked", message: "Allow pop-ups for Social Booster, then try again." };
   if (code === "auth/network-request-failed") return { kind: "error", title: "Connection interrupted", message: "We could not reach Google. Check your connection and try again." };
   if (code === "auth/unauthorized-domain") return { kind: "error", title: "Google sign-in is not available", message: "This website domain must be approved in Firebase Authentication before Google sign-in can continue." };
+  if (code === "auth/operation-not-allowed") return { kind: "info", title: "Google sign-in is being prepared", message: "Please use email and password for now. Your account remains available." };
   if (code === "auth/account-exists-with-different-credential") return { kind: "info", title: "Use your existing sign-in method", message: "This email is already connected to another sign-in method. Sign in with your existing password first; your wallet and order history remain unchanged." };
-  return { kind: "error", title: mode === "login" ? "Unable to sign in" : mode === "register" ? "Unable to register" : "Unable to continue", message: "Check your connection and try again." };
+  if (error instanceof Error && error.message === "SESSION_FAILED") return { kind: "info", title: "Sign-in needs another moment", message: "Your account is safe. Please try once more or use email and password." };
+  return { kind: "error", title: mode === "login" ? "Unable to sign in" : mode === "register" ? "Unable to register" : "Unable to continue", message: "Please try again. If it continues, use your email and password." };
 }
 
 export function AuthForm({ mode, initialNotice, returnTo }: { mode: "login" | "register" | "reset"; initialNotice?: Notice; returnTo?: string }) {
@@ -31,7 +33,7 @@ export function AuthForm({ mode, initialNotice, returnTo }: { mode: "login" | "r
   function destination(admin?: boolean) { if (returnTo?.startsWith("/") && !returnTo.startsWith("//") && (admin || !returnTo.startsWith("/admin"))) return returnTo; return admin ? "/admin?notice=welcome" : "/dashboard?notice=welcome"; }
   async function establishSession(user: User) {
     const response = await fetch("/api/auth/session", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ idToken: await user.getIdToken(true) }) });
-    if (!response.ok) throw new Error("SESSION_FAILED");
+    if (!response.ok) { console.error("[auth] session endpoint rejected sign-in", { status: response.status }); throw new Error("SESSION_FAILED"); }
     const session = await response.json() as { admin?: boolean };
     await firebaseAuth().signOut();
     router.push(destination(session.admin)); router.refresh();

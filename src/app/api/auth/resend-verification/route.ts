@@ -3,6 +3,7 @@ import { FieldValue } from "firebase-admin/firestore";
 import { adminAuth, adminDb } from "@/lib/firebase/admin";
 import { requireUser } from "@/lib/firebase/session";
 import { brandedEmail, sendBrandedEmail } from "@/lib/email";
+import { brandedVerificationLink } from "@/lib/firebase/verification-link";
 
 export async function POST() {
   const session = await requireUser();
@@ -11,7 +12,8 @@ export async function POST() {
     if (account.emailVerified || !account.email) return Response.json({ ok: true, verified: account.emailVerified });
     const ref = adminDb().collection("verificationEmailRateLimits").doc(session.uid), snapshot = await ref.get(), lastSent = snapshot.get("lastSentAt")?.toMillis?.() || 0;
     if (Date.now() - lastSent < 60_000) return Response.json({ ok: true, rateLimited: true });
-    const link = await adminAuth().generateEmailVerificationLink(account.email);
+    const firebaseLink = await adminAuth().generateEmailVerificationLink(account.email);
+    const link = brandedVerificationLink(firebaseLink, process.env.NEXT_PUBLIC_APP_URL || new URL("/", "https://socialbooster.net.ng").origin);
     const delivery = await sendBrandedEmail({ to: account.email, subject: "Verify your Social Booster email", idempotencyKey: `verification-resend-${session.uid}-${Math.floor(Date.now() / 60_000)}`, html: brandedEmail({ title: "Verify your email", preview: "Secure your Social Booster account", message: "Your account is already active. Confirm this email address to secure account recovery and receive important service updates.", buttonLabel: "Verify email", buttonUrl: link }) });
     await Promise.all([
       ref.set({ lastSentAt: FieldValue.serverTimestamp() }, { merge: true }),
