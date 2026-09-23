@@ -4,7 +4,7 @@ import { Toast } from "@/components/toast";
 import { adminDb } from "@/lib/firebase/admin";
 import { requireUser } from "@/lib/firebase/session";
 import { formatMoney } from "@/lib/money";
-import { synchronizeUserOrders } from "@/lib/order-sync";
+import { synchronizeOrderDocuments } from "@/lib/order-sync";
 import { customerOrderStatusLabel } from "@/lib/customer-order-status";
 
 export const dynamic = "force-dynamic";
@@ -54,28 +54,22 @@ export default async function OrdersPage({
   const user = await requireUser();
   const { status = "all", q = "", refresh } = await searchParams;
   let refreshFailed = false;
-  try {
-    await synchronizeUserOrders(user.uid, refresh === "1");
-  } catch (error) {
-    refreshFailed = true;
-    console.warn("[orders] customer status refresh failed", {
-      userId: user.uid,
-      error: error instanceof Error ? error.message : "Unknown error",
-    });
+  const query = adminDb().collection("orders").where("userId", "==", user.uid).orderBy("createdAt", "desc").limit(25);
+  let snapshot = await query.get();
+  if (refresh === "1") {
+    try {
+      await synchronizeOrderDocuments(snapshot.docs.filter((doc) => Number.isInteger(doc.get("providerOrderId"))), true);
+      snapshot = await query.get();
+    } catch (error) {
+      refreshFailed = true;
+      console.warn("[orders] customer status refresh failed", {
+        userId: user.uid,
+        error: error instanceof Error ? error.message : "Unknown error",
+      });
+    }
   }
-  const snapshot = await adminDb()
-    .collection("orders")
-    .where("userId", "==", user.uid)
-    .limit(250)
-    .get();
   const needle = q.trim().toLowerCase();
-  const orders = snapshot.docs
-    .sort(
-      (a, b) =>
-        (b.get("createdAt")?.toMillis?.() || 0) -
-        (a.get("createdAt")?.toMillis?.() || 0),
-    )
-    .filter((doc) => {
+  const orders = snapshot.docs.filter((doc) => {
       const item = doc.data();
       const current = String(item.status || "pending").toLowerCase();
       return (
@@ -85,8 +79,7 @@ export default async function OrdersPage({
             .toLowerCase()
             .includes(needle))
       );
-    })
-    .slice(0, 100);
+    });
   const refreshHref = `/dashboard/orders?status=${encodeURIComponent(status)}&q=${encodeURIComponent(q)}&refresh=1`;
 
   return (
@@ -108,6 +101,7 @@ export default async function OrdersPage({
       <p className="muted page-lead">
         Track start count, remaining quantity and delivery progress.
       </p>
+      {snapshot.size === 25 ? <p className="muted">Showing your 25 most recent orders.</p> : null}
       <div className="section-head">
         <div className="order-filters">
           {filters.map((item) => (

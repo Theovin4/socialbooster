@@ -1,4 +1,5 @@
 import { timingSafeEqual } from "node:crypto";
+import { revalidateTag } from "next/cache";
 import { synchronizeAllProviderServices } from "@/lib/services-sync";
 import { sendRecentActivationEmails } from "@/lib/activation-campaign";
 import { resetJoinedToday } from "@/lib/firebase/stats";
@@ -12,6 +13,7 @@ export async function GET(request: Request) {
     const [services, activations, stats] = await Promise.allSettled([synchronizeAllProviderServices(), sendRecentActivationEmails(), resetJoinedToday()]);
     if (services.status === "rejected" && activations.status === "rejected" && stats.status === "rejected") throw services.reason;
     if (services.status === "rejected") console.error("[services:sync] provider synchronization failed", { error: services.reason instanceof Error ? services.reason.message : String(services.reason) });
+    else revalidateTag("active-service-catalog", "max");
     if (activations.status === "rejected") console.error("[services:sync] activation recovery failed", { error: activations.reason instanceof Error ? activations.reason.message : String(activations.reason) });
     if (stats.status === "rejected") console.error("[services:sync] daily counter reset failed", { error: stats.reason instanceof Error ? stats.reason.message : String(stats.reason) });
     return Response.json({ ok: true, services: services.status === "fulfilled" ? services.value : { error: "Provider synchronization failed" }, activations: activations.status === "fulfilled" ? activations.value : { error: "Activation recovery failed" }, stats: stats.status === "fulfilled" ? stats.value : { error: "Daily counter reset failed" } });

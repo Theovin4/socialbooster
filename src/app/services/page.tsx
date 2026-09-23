@@ -2,10 +2,9 @@ import type { Metadata } from "next";
 import Link from "next/link";
 import { SiteFooter } from "@/components/site-footer";
 import { SiteHeader } from "@/components/site-header";
-import { adminDb } from "@/lib/firebase/admin";
 import { isFirestoreQuotaError } from "@/lib/firebase/errors";
-import { serviceSellingRateNgnMinor } from "@/lib/currency";
 import { formatMoney } from "@/lib/money";
+import { getActiveServiceCatalog } from "@/lib/service-catalog";
 
 export const dynamic = "force-dynamic";
 type Service = { id: string; name: string; category: string; min: number; max: number; refill: boolean; rate: number };
@@ -27,20 +26,8 @@ export default async function Services({ searchParams }: { searchParams: Promise
   let services: Service[] = [];
   let unavailable = false;
   try {
-    const snapshot = await adminDb().collection("services").where("active", "==", true).get();
-    services = snapshot.docs.map((doc) => {
-      const item = doc.data();
-      return {
-        id: doc.id,
-        name: String(item.name),
-        category: String(item.categoryName),
-        min: Number(item.minQuantity),
-        max: Number(item.maxQuantity),
-        refill: item.refillSupported === true,
-        rate: Number(serviceSellingRateNgnMinor(item)),
-      };
-    }).filter((item) => !needle || `${item.id} ${item.name} ${item.category}`.toLowerCase().includes(needle))
-      .sort((a, b) => a.category.localeCompare(b.category) || a.name.localeCompare(b.name));
+    services = (await getActiveServiceCatalog()).map((item) => ({ id: item.id, name: item.name, category: item.category, min: item.min, max: item.max, refill: item.refill, rate: item.rateMinor }))
+      .filter((item) => !needle || `${item.id} ${item.name} ${item.category}`.toLowerCase().includes(needle));
   } catch (error) {
     if (!isFirestoreQuotaError(error)) throw error;
     unavailable = true;

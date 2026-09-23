@@ -7,7 +7,6 @@ import { verifiedProviderStatus } from "./order-status";
 import { sendUserEmail } from "./email";
 import { orderStatusEmailCopy, shouldSendOrderStatusEmail } from "./order-email-policy";
 
-const ACTIVE_STATUSES = ["pending", "processing", "in_progress", "cancel_requested"];
 const STALE_AFTER_MS = 60_000;
 
 function integer(value: string | undefined) {
@@ -72,10 +71,4 @@ export async function synchronizeOrderDocuments(documents: DocumentSnapshot[], f
     }
   }
   return { checked: eligible.length, updated };
-}
-
-export async function synchronizeUserOrders(userId: string, force = false) {
-  const snapshot = await adminDb().collection("orders").where("userId", "==", userId).limit(100).get();
-  const eligible = force ? snapshot.docs.filter((doc) => Number.isInteger(doc.get("providerOrderId"))) : snapshot.docs.filter((doc) => ACTIVE_STATUSES.includes(String(doc.get("status"))));
-  return synchronizeOrderDocuments(eligible, force);
 }

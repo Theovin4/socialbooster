@@ -41,8 +41,8 @@ export default async function OrderPage({
   let refreshFailed = false;
   if (active.has(String(snapshot.get("status"))) || refresh === "1") {
     try {
-      await synchronizeOrderDocuments([snapshot], refresh === "1");
-      snapshot = await ref.get();
+      const result = await synchronizeOrderDocuments([snapshot], refresh === "1");
+      if (result.checked > 0) snapshot = await ref.get();
     } catch (error) {
       refreshFailed = true;
       console.warn("[order] status refresh failed", {

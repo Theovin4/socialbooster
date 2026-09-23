@@ -17,23 +17,25 @@ export default async function Dashboard({ searchParams }: { searchParams: Promis
   let dataAvailable = true;
   let walletData: FirebaseFirestore.DocumentData = {};
   let orderDocs: FirebaseFirestore.QueryDocumentSnapshot[] = [];
-  try {
-    const db = adminDb();
-    const [wallet, orderSnapshot] = await Promise.all([
-      db.collection("wallets").doc(user.uid).get(),
-      db.collection("orders").where("userId", "==", user.uid).limit(50).get(),
-    ]);
-    walletData = wallet.data() || {};
-    orderDocs = orderSnapshot.docs;
-  } catch (error) {
+  let active = 0, completed = 0;
+  const db = adminDb();
+  const results = await Promise.allSettled([
+    db.collection("wallets").doc(user.uid).get(),
+    db.collection("orders").where("userId", "==", user.uid).orderBy("createdAt", "desc").limit(5).get(),
+    db.collection("orders").where("userId", "==", user.uid).where("status", "in", ["pending", "processing", "in_progress", "submitting", "provider_confirmation_required", "cancel_requested"]).count().get(),
+    db.collection("orders").where("userId", "==", user.uid).where("status", "==", "completed").count().get(),
+  ] as const);
+  if (results.some((result) => result.status === "rejected")) {
     dataAvailable = false;
-    console.error("[dashboard] account data unavailable", { userId: user.uid, error: error instanceof Error ? error.message : "Unknown error" });
+    results.forEach((result, index) => { if (result.status === "rejected") console.error("[dashboard] account metric unavailable", { userId: user.uid, metric: ["wallet", "recentOrders", "activeOrders", "completedOrders"][index], error: result.reason instanceof Error ? result.reason.message : "Unknown error" }); });
   }
+  if (results[0].status === "fulfilled") walletData = results[0].value.data() || {};
+  if (results[1].status === "fulfilled") orderDocs = results[1].value.docs;
+  if (results[2].status === "fulfilled") active = Number(results[2].value.data().count || 0);
+  if (results[3].status === "fulfilled") completed = Number(results[3].value.data().count || 0);
   const available = Number(walletData.availableMinor ?? walletData.balanceMinor ?? 0);
   const currency = String(walletData.currency || "NGN");
-  const sorted = orderDocs.sort((a, b) => (b.get("createdAt")?.toMillis?.() || 0) - (a.get("createdAt")?.toMillis?.() || 0));
-  const active = sorted.filter((doc) => !["completed", "cancelled", "refunded", "failed"].includes(String(doc.get("status") || "").toLowerCase())).length;
-  const completed = sorted.filter((doc) => String(doc.get("status") || "").toLowerCase() === "completed").length;
+  const sorted = orderDocs;
   const cards = [["Available balance", dataAvailable ? formatMoney(BigInt(available), currency) : "Updating…", WalletCards], ["Active orders", dataAvailable ? String(active) : "Updating…", ClipboardList], ["Completed orders", dataAvailable ? String(completed) : "Updating…", ArrowUpRight]] as const;
 
   return <AppShell>

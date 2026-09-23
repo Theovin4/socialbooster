@@ -31,8 +31,8 @@ export async function reconcileFlutterwaveTransaction(transactionId: number, sou
 }
 
 export async function reconcilePendingFlutterwavePayments(userId: string) {
-  const snapshot = await adminDb().collection("paymentIntents").where("userId", "==", userId).limit(25).get();
-  const pending = snapshot.docs.filter((doc) => doc.get("provider") === "flutterwave" && doc.get("status") === "pending");
+  const snapshot = await adminDb().collection("paymentIntents").where("userId", "==", userId).where("provider", "==", "flutterwave").where("status", "==", "pending").limit(5).get();
+  const pending = snapshot.docs;
   let credited = 0;
   for (const intent of pending) {
     try {

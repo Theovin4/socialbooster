@@ -1,6 +1,6 @@
 "use server";
 import { FieldValue } from "firebase-admin/firestore";
-import { revalidatePath } from "next/cache";
+import { revalidatePath, revalidateTag } from "next/cache";
 import { redirect } from "next/navigation";
 import { adminDb } from "@/lib/firebase/admin";
 import { requireAdmin } from "@/lib/firebase/session";
@@ -8,7 +8,7 @@ import { DEFAULT_MARGIN_BPS, decimalToMinor, sellingPriceMinor } from "@/lib/mon
 import { isProviderKey } from "@/lib/providers";
 import { synchronizeProviderServices } from "@/lib/services-sync";
 
-const refresh = () => { revalidatePath("/admin/services"); revalidatePath("/services"); };
+const refresh = () => { revalidateTag("active-service-catalog", "max"); revalidatePath("/admin/services"); revalidatePath("/services"); };
 const validServiceId = (id: string) => /^(?:\d+|(?:nitro|smmworld)_\d+)$/.test(id);
 
 export async function syncAllServices(formData: FormData) {
@@ -29,7 +29,7 @@ export async function syncAllServices(formData: FormData) {
           ? "format"
           : "failed";
   }
-  revalidatePath(`/admin/services?provider=${provider}`); revalidatePath("/services");
+  revalidateTag("active-service-catalog", "max"); revalidatePath(`/admin/services?provider=${provider}`); revalidatePath("/services");
   revalidatePath("/admin/provider");
   redirect(`/admin/services?provider=${provider}&sync=${outcome}`);
 }

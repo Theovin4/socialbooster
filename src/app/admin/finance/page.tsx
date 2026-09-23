@@ -156,6 +156,17 @@ export default async function FinancePage({
           Reset
         </Link>
       </form>
+      {data.truncated ? (
+        <div className="notice" style={{ marginTop: 18 }}>
+          <strong>Quota-safe report view</strong>
+          <p className="muted" style={{ marginBottom: 0 }}>
+            This dashboard is using the latest{" "}
+            {data.limit.toLocaleString("en-NG")} records in the selected period.
+            Choose a shorter date range for complete period totals, or use the
+            downloadable report when you need a larger export.
+          </p>
+        </div>
+      ) : null}
       <div className="finance-kpis">
         {cards.map(([label, value]) => (
           <article className="glass card stat-card" key={label}>

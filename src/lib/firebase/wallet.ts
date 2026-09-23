@@ -23,11 +23,14 @@ export async function ensureWallet(userId: string, currency = "NGN") {
   if (!userId) throw new Error("Invalid wallet user");
   if (!CURRENCIES.has(currency)) throw new Error("Unsupported wallet currency");
   const db = adminDb(), ref = db.collection("wallets").doc(userId);
-  await db.runTransaction(async (transaction) => {
+  const data = await db.runTransaction(async (transaction) => {
     const snapshot = await transaction.get(ref);
-    if (!snapshot.exists) transaction.create(ref, { userId, currency, availableMinor: 0, reservedMinor: 0, balanceMinor: 0, version: 1, createdAt: FieldValue.serverTimestamp(), updatedAt: FieldValue.serverTimestamp() });
+    if (snapshot.exists) return snapshot.data()!;
+    const initial = { userId, currency, availableMinor: 0, reservedMinor: 0, balanceMinor: 0, version: 1 };
+    transaction.create(ref, { ...initial, createdAt: FieldValue.serverTimestamp(), updatedAt: FieldValue.serverTimestamp() });
+    return initial;
   });
-  return ref;
+  return { ref, data };
 }
 
 export async function postWallet(input: WalletEntry) {

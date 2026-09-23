@@ -3,6 +3,7 @@ import { requireAdmin } from "@/lib/firebase/session";
 import { loadFinanceData } from "@/lib/finance-data";
 
 export const runtime = "nodejs";
+export const dynamic = "force-dynamic";
 const naira = "₦#,##0.00;[Red](₦#,##0.00);-";
 const header = {
   font: { bold: true, color: { argb: "FFFFFFFF" } },
@@ -29,7 +30,7 @@ export async function GET(request: Request) {
     to: url.searchParams.get("to") || undefined,
     status: url.searchParams.get("status") || "all",
   };
-  const data = await loadFinanceData(filters);
+  const data = await loadFinanceData(filters, { limit: 1_000 });
   const workbook = new ExcelJS.Workbook();
   workbook.creator = "Social Booster";
   workbook.created = new Date();
@@ -120,6 +121,10 @@ export async function GET(request: Request) {
   summary.getCell("A5").value = "Generated";
   summary.getCell("B5").value = new Date();
   summary.getCell("B5").numFmt = "yyyy-mm-dd hh:mm";
+  summary.getCell("A6").value = "Data scope";
+  summary.getCell("B6").value = data.truncated
+    ? `Latest ${data.limit.toLocaleString("en-NG")} records per dataset. Use a shorter period for complete totals.`
+    : "Complete for the selected period";
   const metrics = [
     [
       "Customer deposits",

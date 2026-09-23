@@ -3,8 +3,8 @@ import { z } from "zod";
 import { authenticateCustomerApi, CustomerApiError, hashCustomerApiKey } from "@/lib/customer-api";
 import { adminDb } from "@/lib/firebase/admin";
 import { createAndSubmitOrder } from "@/lib/orders";
-import { serviceSellingRateNgnMinor } from "@/lib/currency";
 import { customerOrderStatusLabel } from "@/lib/customer-order-status";
+import { getActiveServiceCatalog } from "@/lib/service-catalog";
 
 export const dynamic = "force-dynamic";
 const addSchema = z.object({ service: z.coerce.string().regex(/^(?:\d+|(?:nitro|smmworld)_\d+)$/), link: z.string().url().max(2048), quantity: z.coerce.number().int().positive(), idempotency_key: z.string().regex(/^[A-Za-z0-9_-]{8,80}$/).optional() });
@@ -22,8 +22,8 @@ export async function POST(request: Request) {
     const auth = await authenticateCustomerApi(request, body.key);
     const db = adminDb();
     if (action === "services") {
-      const snapshot = await db.collection("services").where("active", "==", true).limit(5000).get();
-      return Response.json(snapshot.docs.map((doc) => { const service = doc.data(); return { service: doc.id, name: service.name, type: service.type, category: service.categoryName, rate: amount(Number(serviceSellingRateNgnMinor(service))), min: service.minQuantity, max: service.maxQuantity, refill: service.refillSupported === true, cancel: service.cancelSupported === true, currency: "NGN" }; }));
+      const services = await getActiveServiceCatalog();
+      return Response.json(services.map((service) => ({ service: service.id, name: service.name, type: service.type, category: service.category, rate: amount(service.rateMinor), min: service.min, max: service.max, refill: service.refill, cancel: service.cancel, currency: "NGN" })));
     }
     if (action === "balance") {
       const wallet = await db.collection("wallets").doc(auth.userId).get();

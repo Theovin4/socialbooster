@@ -17,7 +17,7 @@ export default async function TicketPage({ params, searchParams }: { params: Pro
   const db = adminDb();
   const ticket = await db.collection("supportTickets").doc(id).get();
   if (!ticket.exists || ticket.get("userId") !== user.uid || ticket.get("source") === "inbound_email") notFound();
-  const messageSnapshot = await db.collection("supportMessages").where("ticketId", "==", id).limit(200).get();
+  const messageSnapshot = await db.collection("supportMessages").where("ticketId", "==", id).limit(50).get();
   const messages = messageSnapshot.docs.sort((a, b) => (a.get("createdAt")?.toMillis?.() || 0) - (b.get("createdAt")?.toMillis?.() || 0));
   const closed = ticket.get("status") === "closed";
   const orderId = String(ticket.get("orderId") || "");

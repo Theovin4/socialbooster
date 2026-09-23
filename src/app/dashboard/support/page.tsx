@@ -16,7 +16,7 @@ export default async function SupportPage({ searchParams }: { searchParams: Prom
   const user = await requireUser();
   const { order = "", view = "open", draft = "" } = await searchParams;
   const messageDraft = draft.trim().slice(0, 1000);
-  const snapshot = await adminDb().collection("supportTickets").where("userId", "==", user.uid).limit(100).get();
+  const snapshot = await adminDb().collection("supportTickets").where("userId", "==", user.uid).limit(25).get();
   const allTickets = snapshot.docs.sort((a, b) => (b.get("updatedAt")?.toMillis?.() || b.get("createdAt")?.toMillis?.() || 0) - (a.get("updatedAt")?.toMillis?.() || a.get("createdAt")?.toMillis?.() || 0));
   const openCount = allTickets.filter((item) => item.get("status") !== "closed").length;
   const closedCount = allTickets.length - openCount;
