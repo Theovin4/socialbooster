@@ -7,6 +7,7 @@ import { serviceSellingRateNgnMinor } from "./currency";
 import { ProviderError } from "./providers/followspanel";
 import { getProvider, normalizeProviderKey } from "./providers";
 import { sendAdminAlert, sendUserEmail } from "./email";
+import { recordNewOrder } from "./firebase/stats";
 
 export type NewOrder = { userId: string; serviceId: string; link: string; quantity: number; idempotencyKey: string };
 export async function createAndSubmitOrder(input: NewOrder) {
@@ -35,6 +36,7 @@ export async function createAndSubmitOrder(input: NewOrder) {
     const providerKey = normalizeProviderKey(data.providerKey);
     const order = { userId: input.userId, serviceId: input.serviceId, serviceName: data.name, providerKey, providerLabel: data.providerLabel || getProvider(providerKey).label, providerServiceId: data.providerServiceId, link: input.link, quantity: input.quantity, currency, sellingRateMinor: Number(sellingRateMinor), providerCurrency: data.providerCurrency || "NGN", providerRateMinor: data.providerRateMinor, providerCostMinor, convertedProviderCostMinor, customerPriceMinor, grossProfitMinor, markupBps: data.markupBps ?? 4000, grossMarginBps: Math.floor(grossProfitMinor * 10000 / customerPriceMinor), pricingModel: "ngn_markup_v1", refillSupported: data.refillSupported, cancelSupported: data.cancelSupported, status: "submitting", idempotencyKey: input.idempotencyKey, createdAt: FieldValue.serverTimestamp(), updatedAt: FieldValue.serverTimestamp() };
     transaction.create(orderRef, order); transaction.create(db.collection("orderEvents").doc(), { orderId: orderRef.id, userId: input.userId, status: "submitting", createdAt: FieldValue.serverTimestamp() });
+    recordNewOrder(transaction);
     return order;
   });
   if (("providerOrderId" in local && local.providerOrderId) || local.status !== "submitting") return { id: orderRef.id, status: local.status };
