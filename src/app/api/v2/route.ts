@@ -51,4 +51,4 @@ export async function POST(request: Request) {
   }
 }
 
-export function GET() { return Response.json({ name: "Social Booster API", version: "v2", endpoint: "POST /api/v2", documentation: "/dashboard/api" }); }
+export function GET() { return Response.json({ name: "Social Booster API", version: "v2", endpoint: "POST /api/v2", documentation: "https://www.socialbooster.net.ng/api-docs" }); }
