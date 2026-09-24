@@ -1,4 +1,5 @@
 import { unstable_cache } from "next/cache";
+import { FieldPath } from "firebase-admin/firestore";
 import { serviceSellingRateNgnMinor } from "./currency";
 import { adminDb } from "./firebase/admin";
 
@@ -27,13 +28,20 @@ export type ServiceCatalogPage = {
   totalPages: number;
 };
 
-/**
- * The catalogue is shared by every visitor. Firestore is read once per cache
- * refresh instead of once per customer page view or API request.
- */
-export const getActiveServiceCatalog = unstable_cache(async (): Promise<CachedService[]> => {
-  const snapshot = await adminDb().collection("services").where("active", "==", true).get();
-  return snapshot.docs.map((doc) => {
+const CATALOG_CHUNK_SIZE = 400;
+
+type CatalogChunk = { items: CachedService[]; lastId: string | null; hasMore: boolean };
+
+function getCatalogChunk(afterId: string) {
+  return unstable_cache(async (): Promise<CatalogChunk> => {
+    let query = adminDb().collection("services")
+      .where("active", "==", true)
+      .orderBy(FieldPath.documentId())
+      .select("name", "categoryName", "type", "minQuantity", "maxQuantity", "refillSupported", "cancelSupported", "providerRateMinor", "updatedAt")
+      .limit(CATALOG_CHUNK_SIZE);
+    if (afterId) query = query.startAfter(afterId);
+    const snapshot = await query.get();
+    const items = snapshot.docs.map((doc) => {
     const item = doc.data();
     return {
       id: doc.id,
@@ -51,8 +59,26 @@ export const getActiveServiceCatalog = unstable_cache(async (): Promise<CachedSe
       rateMinor: Number(serviceSellingRateNgnMinor(item)),
       updatedAt: item.updatedAt?.toDate?.().toISOString?.() || null,
     };
-  }).sort((a, b) => a.category.localeCompare(b.category) || a.name.localeCompare(b.name));
-}, ["active-service-catalog-v2-compact"], { revalidate: 86_400, tags: [SERVICE_CATALOG_TAG] });
+    });
+    return { items, lastId: snapshot.docs.at(-1)?.id || null, hasMore: snapshot.size === CATALOG_CHUNK_SIZE };
+  }, ["active-service-catalog-v3-chunk", afterId || "start"], { revalidate: 86_400, tags: [SERVICE_CATALOG_TAG] })();
+}
+
+/**
+ * The catalogue is shared by every visitor. It is cached in bounded chunks so
+ * no Vercel cache item can exceed the 2 MB platform limit.
+ */
+export async function getActiveServiceCatalog(): Promise<CachedService[]> {
+  const catalog: CachedService[] = [];
+  let afterId = "";
+  for (let page = 0; page < 100; page += 1) {
+    const chunk = await getCatalogChunk(afterId);
+    catalog.push(...chunk.items);
+    if (!chunk.hasMore || !chunk.lastId || chunk.lastId === afterId) break;
+    afterId = chunk.lastId;
+  }
+  return catalog.sort((a, b) => a.category.localeCompare(b.category) || a.name.localeCompare(b.name));
+}
 
 /**
  * Sends only one bounded page to the browser. The shared catalogue remains
