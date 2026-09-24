@@ -13,6 +13,9 @@ export async function synchronizeProviderServices(providerKey: ProviderDefinitio
   const reportedCurrency = String(balance.currency || provider.currency).trim().toUpperCase();
   if (reportedCurrency !== "NGN" && reportedCurrency !== "USD") throw new Error(`${provider.label} returned an unsupported account currency`);
   const providerCurrency: "NGN" | "USD" = reportedCurrency;
+  const providerBalance = Number.parseFloat(String(balance.balance));
+  if (!Number.isFinite(providerBalance) || providerBalance < 0) throw new Error(`${provider.label} returned an invalid account balance`);
+  const providerFunded = providerBalance > 0;
   const db = adminDb();
   const providerCatalogue = db.collection("providerServices");
   const customerCatalogue = db.collection("services");
@@ -45,14 +48,17 @@ export async function synchronizeProviderServices(providerKey: ProviderDefinitio
       changed += 1;
     }
     const existing = services.get(id), pricingFingerprint = createHash("sha256").update(JSON.stringify({ ...providerData, providerRateNgnMinor: String(providerRateNgnMinor), markupBps: Number(markupBps) })).digest("hex");
-    const active = provider.key === "followspanel" ? existing?.active === true : true;
+    // Backup catalogues are safe to synchronize while unfunded, but their
+    // services must not accept customer orders until the account has funds.
+    // A later funded synchronization automatically re-enables them.
+    const active = provider.key === "followspanel" ? existing?.active === true : providerFunded;
     if (existing?.pricingFingerprint === pricingFingerprint && existing?.pricingModel === "ngn_markup_v1" && existing?.active === active) continue;
     const grossMarginBps = Number((sellingRateMinor - providerRateNgnMinor) * 10000n / sellingRateMinor);
     writer.set(db.collection("services").doc(id), { ...providerData, providerNativeRateMinor: Number(nativeRateMinor), providerRateMinor: Number(providerRateNgnMinor), providerRateNgnMinor: Number(providerRateNgnMinor), sellingCurrency: "NGN", sellingRateMinor: Number(sellingRateMinor), pricingModel: "ngn_markup_v1", pricingFingerprint, markupBps: Number(markupBps), grossMarginBps, active, autoImported: true, customSellingRateMinor: FieldValue.delete(), marginBps: FieldValue.delete(), updatedAt: FieldValue.serverTimestamp(), ...(existing ? {} : { createdAt: FieldValue.serverTimestamp() }) }, { merge: true });
     changed += 1; repriced += 1;
   }
   await writer.close();
-  const result = { provider: provider.key, providerCurrency, providerBalance: balance.balance, serviceCount: rows.length, changedCount: changed, repricedCount: repriced, durationMs: Date.now() - startedAt };
+  const result = { provider: provider.key, providerCurrency, providerBalance: balance.balance, providerFunded, serviceCount: rows.length, changedCount: changed, repricedCount: repriced, durationMs: Date.now() - startedAt };
   await db.collection("providerSyncState").doc(provider.key).set({ ...result, status: "completed", completedAt: FieldValue.serverTimestamp() }, { merge: true });
   console.info("[services:sync] completed", result);
   return result;

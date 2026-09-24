@@ -40,7 +40,10 @@ export const getActiveServiceCatalog = unstable_cache(async (): Promise<CachedSe
       name: String(item.name || "Service"),
       category: String(item.categoryName || "Other"),
       type: String(item.type || "default"),
-      description: String(item.description || "").trim().slice(0, 800),
+      // Keep the shared list cache compact. Full descriptions remain in the
+      // individual Firestore service document and are loaded only where a
+      // dedicated service page needs them.
+      description: "",
       min: Number(item.minQuantity || 1),
       max: Number(item.maxQuantity || 1),
       refill: item.refillSupported === true,
@@ -49,7 +52,7 @@ export const getActiveServiceCatalog = unstable_cache(async (): Promise<CachedSe
       updatedAt: item.updatedAt?.toDate?.().toISOString?.() || null,
     };
   }).sort((a, b) => a.category.localeCompare(b.category) || a.name.localeCompare(b.name));
-}, ["active-service-catalog-v1"], { revalidate: 86_400, tags: [SERVICE_CATALOG_TAG] });
+}, ["active-service-catalog-v2-compact"], { revalidate: 86_400, tags: [SERVICE_CATALOG_TAG] });
 
 /**
  * Sends only one bounded page to the browser. The shared catalogue remains
