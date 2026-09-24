@@ -53,6 +53,14 @@ export async function createAndSubmitOrder(input: NewOrder) {
   } catch (error) {
     const definitelyRejected = error instanceof ProviderError && ["NOT_CONFIGURED", "UPSTREAM_REJECTED"].includes(error.code);
     const status = definitelyRejected ? "failed" : "provider_confirmation_required";
+    console.error("[order-submit] provider submission did not complete", {
+      orderId: orderRef.id,
+      providerKey: local.providerKey,
+      providerServiceId: local.providerServiceId,
+      status,
+      code: error instanceof ProviderError ? error.code : "NETWORK",
+      error: error instanceof Error ? error.message : "Unknown error",
+    });
     await orderRef.set({ status, providerErrorCode: error instanceof ProviderError ? error.code : "NETWORK", updatedAt: FieldValue.serverTimestamp() }, { merge: true });
     if (definitelyRejected) await postWallet({ userId: input.userId, type: "refund", deltaMinor: local.customerPriceMinor, currency: local.currency, idempotencyKey: `refund:${orderRef.id}`, reference: orderRef.id, reason: "Provider rejected order submission" });
     return { id: orderRef.id, status };

@@ -54,17 +54,26 @@ function customerGrowth(totals: OperationalTotals, period: Period): Growth {
 async function aggregateDashboardMetrics() {
   const db = adminDb();
   const attentionStatuses = ["pending", "processing", "in_progress", "submitting", "provider_confirmation_required", "cancel_requested"];
-  const [services, orders, wallets, deposits] = await Promise.all([
+  const results = await Promise.allSettled([
     db.collection("services").where("active", "==", true).count().get(),
     db.collection("orders").where("status", "in", attentionStatuses).count().get(),
     db.collection("wallets").where("currency", "==", "NGN").aggregate({ total: AggregateField.sum("availableMinor") }).get(),
-    db.collection("walletTransactions").where("type", "==", "deposit").where("currency", "==", "NGN").aggregate({ total: AggregateField.sum("deltaMinor") }).get(),
+    db.collection("walletTransactions").where("type", "==", "deposit").aggregate({ total: AggregateField.sum("deltaMinor") }).get(),
   ]);
+  const failed: string[] = [];
+  const read = <T,>(index: number, label: string, value: (snapshot: never) => T): T | null => {
+    const result = results[index];
+    if (result.status === "fulfilled") return value(result.value as never);
+    failed.push(label);
+    console.error("[admin-dashboard] aggregate unavailable", { metric: label, error: result.reason instanceof Error ? result.reason.message : "Unknown error" });
+    return null;
+  };
   return {
-    activeServices: Number(services.data().count || 0),
-    pending: Number(orders.data().count || 0),
-    walletMinor: Number(wallets.data().total || 0),
-    depositsMinor: Number(deposits.data().total || 0),
+    activeServices: read(0, "active services", (snapshot: { data(): { count?: number } }) => Number(snapshot.data().count || 0)),
+    pending: read(1, "orders requiring attention", (snapshot: { data(): { count?: number } }) => Number(snapshot.data().count || 0)),
+    walletMinor: read(2, "customer wallet balance", (snapshot: { data(): { total?: number } }) => Number(snapshot.data().total || 0)),
+    depositsMinor: read(3, "verified deposits", (snapshot: { data(): { total?: number } }) => Number(snapshot.data().total || 0)),
+    failed,
   };
 }
 
@@ -79,6 +88,7 @@ export default async function Admin({ searchParams }: { searchParams: Promise<{ 
   }
   const totals = results[0].status === "fulfilled" ? results[0].value : null;
   const metrics = results[1].status === "fulfilled" ? results[1].value : null;
+  if (metrics?.failed.length) dataAvailable = false;
   const customers = totals ? customerGrowth(totals, period) : null;
   const unavailable = "Unavailable";
   const cards = [
@@ -87,10 +97,10 @@ export default async function Admin({ searchParams }: { searchParams: Promise<{ 
     ["Joined in 7 days", customers?.week.toLocaleString("en-NG") ?? unavailable],
     ["Total orders", totals?.totalOrders.toLocaleString("en-NG") ?? unavailable],
     [`${periods[period]} growth`, customers ? `${customers.growth >= 0 ? "+" : ""}${customers.growth.toFixed(1)}%` : unavailable],
-    ["Active services", metrics?.activeServices.toLocaleString("en-NG") ?? unavailable],
-    ["Orders requiring attention", metrics?.pending.toLocaleString("en-NG") ?? unavailable],
-    ["Customer wallet balance", metrics ? formatMoney(BigInt(metrics.walletMinor), "NGN") : unavailable],
-    ["Verified deposits", metrics ? formatMoney(BigInt(metrics.depositsMinor), "NGN") : unavailable],
+    ["Active services", metrics?.activeServices?.toLocaleString("en-NG") ?? unavailable],
+    ["Orders requiring attention", metrics?.pending?.toLocaleString("en-NG") ?? unavailable],
+    ["Customer wallet balance", metrics?.walletMinor !== null && metrics?.walletMinor !== undefined ? formatMoney(BigInt(metrics.walletMinor), "NGN") : unavailable],
+    ["Verified deposits", metrics?.depositsMinor !== null && metrics?.depositsMinor !== undefined ? formatMoney(BigInt(metrics.depositsMinor), "NGN") : unavailable],
   ];
   const maximum = Math.max(1, ...(customers?.buckets || []).map((bucket) => bucket.count));
   return <AppShell admin>

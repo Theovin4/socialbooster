@@ -8,7 +8,12 @@ import { providerDefinitions, providerServiceDocumentId, type ProviderDefinition
 export async function synchronizeProviderServices(providerKey: ProviderDefinition["key"]) {
   const provider = providerDefinitions().find((item) => item.key === providerKey);
   if (!provider?.configured) throw new Error(`${provider?.label || providerKey} is not configured`);
-  const startedAt = Date.now(), rows = await provider.client.services(), db = adminDb();
+  const startedAt = Date.now();
+  const [rows, balance] = await Promise.all([provider.client.services(), provider.client.balance()]);
+  const reportedCurrency = String(balance.currency || provider.currency).trim().toUpperCase();
+  if (reportedCurrency !== "NGN" && reportedCurrency !== "USD") throw new Error(`${provider.label} returned an unsupported account currency`);
+  const providerCurrency: "NGN" | "USD" = reportedCurrency;
+  const db = adminDb();
   const providerCatalogue = db.collection("providerServices");
   const customerCatalogue = db.collection("services");
   const providerQuery = provider.key === "followspanel"
@@ -31,9 +36,9 @@ export async function synchronizeProviderServices(providerKey: ProviderDefinitio
   for (const item of rows) {
     const id = providerServiceDocumentId(provider.key, item.service);
     const nativeRateMinor = decimalToMinor(item.rate);
-    const providerRateNgnMinor = provider.currency === "USD" ? convertMinor(nativeRateMinor, usdToNgn) : nativeRateMinor;
+    const providerRateNgnMinor = providerCurrency === "USD" ? convertMinor(nativeRateMinor, usdToNgn) : nativeRateMinor;
     const sellingRateMinor = sellingPriceMinor(providerRateNgnMinor, markupBps);
-    const providerData = { providerKey: provider.key, providerLabel: provider.label, providerServiceId: item.service, name: item.name, description: "description" in item ? item.description || "" : "", categoryName: item.category, type: item.type, rateText: item.rate, providerNativeRateMinor: Number(nativeRateMinor), providerRateNgnMinor: Number(providerRateNgnMinor), minQuantity: item.min, maxQuantity: item.max, refillSupported: item.refill, cancelSupported: item.cancel, isActive: true, providerCurrency: provider.currency };
+    const providerData = { providerKey: provider.key, providerLabel: provider.label, providerServiceId: item.service, name: item.name, description: "description" in item ? item.description || "" : "", categoryName: item.category, type: item.type, rateText: item.rate, providerNativeRateMinor: Number(nativeRateMinor), providerRateNgnMinor: Number(providerRateNgnMinor), minQuantity: item.min, maxQuantity: item.max, refillSupported: item.refill, cancelSupported: item.cancel, isActive: true, providerCurrency };
     const syncFingerprint = createHash("sha256").update(JSON.stringify(providerData)).digest("hex");
     if (providers.get(id)?.syncFingerprint !== syncFingerprint) {
       writer.set(db.collection("providerServices").doc(id), { ...providerData, syncFingerprint, lastSyncedAt: FieldValue.serverTimestamp() }, { merge: true });
@@ -47,7 +52,7 @@ export async function synchronizeProviderServices(providerKey: ProviderDefinitio
     changed += 1; repriced += 1;
   }
   await writer.close();
-  const result = { provider: provider.key, serviceCount: rows.length, changedCount: changed, repricedCount: repriced, durationMs: Date.now() - startedAt };
+  const result = { provider: provider.key, providerCurrency, providerBalance: balance.balance, serviceCount: rows.length, changedCount: changed, repricedCount: repriced, durationMs: Date.now() - startedAt };
   await db.collection("providerSyncState").doc(provider.key).set({ ...result, status: "completed", completedAt: FieldValue.serverTimestamp() }, { merge: true });
   console.info("[services:sync] completed", result);
   return result;

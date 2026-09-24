@@ -4,7 +4,7 @@ import { z } from "zod";
 import { requireUser } from "@/lib/firebase/session";
 import { createAndSubmitOrder, newOrderId } from "@/lib/orders";
 
-const orderSchema = z.object({ serviceId: z.string().regex(/^\d+$/), link: z.string().url().max(2000), quantity: z.coerce.number().int().positive(), confirmed: z.literal("yes") });
+const orderSchema = z.object({ serviceId: z.string().regex(/^(?:\d+|(?:nitro|smmworld)_\d+)$/), link: z.string().url().max(2000), quantity: z.coerce.number().int().positive(), confirmed: z.literal("yes") });
 export type OrderActionState = { status: "idle" | "error"; message: string };
 export async function submitOrder(_previous: OrderActionState, formData: FormData): Promise<OrderActionState> {
   const user = await requireUser();
@@ -20,6 +20,7 @@ export async function submitOrder(_previous: OrderActionState, formData: FormDat
     if (message === "Order submission is not enabled") return { status: "error", message: "Orders are temporarily unavailable. Please try again later." };
     return { status: "error", message: "We could not submit this order. Review the details and try again." };
   }
+  if (result.status === "failed") return { status: "error", message: "This service is temporarily unavailable. Your wallet was refunded automatically; please choose another service or try again later." };
   redirect(`/dashboard/orders/${result.id}?notice=order-created`);
 }
 export async function submitMassOrders(formData: FormData) { const user = await requireUser(); if (formData.get("confirmed") !== "yes") throw new Error("Confirmation required"); const lines = String(formData.get("orders") || "").split(/\r?\n/).map((x) => x.trim()).filter(Boolean); if (!lines.length || lines.length > 10) throw new Error("Enter between 1 and 10 orders"); const ids: string[] = []; for (const line of lines) { const [serviceId, link, quantityText] = line.split("|").map((x) => x.trim()); const parsed = orderSchema.omit({ confirmed: true }).parse({ serviceId, link, quantity: quantityText }); const result = await createAndSubmitOrder({ userId: user.uid, ...parsed, idempotencyKey: newOrderId() }); ids.push(result.id); } redirect(`/dashboard/orders?submitted=${ids.length}`); }

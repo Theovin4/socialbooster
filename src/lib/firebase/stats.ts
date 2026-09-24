@@ -1,5 +1,5 @@
 import { FieldValue, Timestamp, type DocumentSnapshot, type Transaction } from "firebase-admin/firestore";
-import { adminDb } from "./admin";
+import { adminAuth, adminDb } from "./admin";
 
 export type OperationalTotals = {
   totalCustomers: number;
@@ -12,6 +12,7 @@ export type OperationalTotals = {
 
 const STATS_COLLECTION = "stats";
 const TOTALS_DOCUMENT = "totals";
+const RECONCILIATION_VERSION = 2;
 
 export function lagosDateKey(date = new Date()) {
   const parts = new Intl.DateTimeFormat("en-CA", {
@@ -74,43 +75,55 @@ export function recordNewOrder(transaction: Transaction) {
   }, { merge: true });
 }
 
-async function initializeTotalsOnce() {
+/**
+ * Rebuilds the counter from Firebase Authentication without reading every
+ * Firestore customer profile. This is intentionally versioned so migrations
+ * run once, while normal registrations keep the one-document counter current.
+ */
+export async function reconcileOperationalTotals() {
   const db = adminDb();
   const ref = totalsDocument();
   const todayKey = lagosDateKey();
-  const startOfToday = new Date(`${todayKey}T00:00:00+01:00`);
-  const [customers, orders, joinedToday] = await Promise.all([
-    db.collection("users").where("role", "==", "customer").count().get(),
-    db.collection("orders").count().get(),
-    db.collection("users").where("createdAt", ">=", Timestamp.fromDate(startOfToday)).count().get(),
-  ]);
-  const aggregateCustomers = numberValue(customers.data().count);
-  const aggregateOrders = numberValue(orders.data().count);
-  const aggregateToday = numberValue(joinedToday.data().count);
+  const dailyCustomerJoins: Record<string, number> = {};
+  let totalCustomers = 0;
+  let pageToken: string | undefined;
 
-  await db.runTransaction(async (transaction) => {
-    const current = await transaction.get(ref);
-    if (current.get("initialized") === true) return;
-    const currentDaily = dailyValues(current.get("dailyCustomerJoins"));
-    currentDaily[todayKey] = Math.max(currentDaily[todayKey] || 0, aggregateToday);
-    transaction.set(ref, {
-      initialized: true,
-      totalCustomers: Math.max(numberValue(current.get("totalCustomers")), aggregateCustomers),
-      joinedToday: Math.max(current.get("todayKey") === todayKey ? numberValue(current.get("joinedToday")) : 0, aggregateToday),
-      totalOrders: Math.max(numberValue(current.get("totalOrders")), aggregateOrders),
-      todayKey,
-      dailyCustomerJoins: currentDaily,
-      lastUpdated: FieldValue.serverTimestamp(),
-    }, { merge: true });
-  });
+  do {
+    const page = await adminAuth().listUsers(1_000, pageToken);
+    for (const user of page.users) {
+      if (user.customClaims?.admin === true) continue;
+      totalCustomers += 1;
+      const createdAt = new Date(user.metadata.creationTime);
+      if (!Number.isNaN(createdAt.getTime())) {
+        const key = lagosDateKey(createdAt);
+        dailyCustomerJoins[key] = (dailyCustomerJoins[key] || 0) + 1;
+      }
+    }
+    pageToken = page.pageToken;
+  } while (pageToken);
+
+  const orders = await db.collection("orders").count().get();
+  const totalOrders = numberValue(orders.data().count);
+  await ref.set({
+    initialized: true,
+    reconciliationVersion: RECONCILIATION_VERSION,
+    totalCustomers,
+    joinedToday: dailyCustomerJoins[todayKey] || 0,
+    totalOrders,
+    todayKey,
+    dailyCustomerJoins,
+    lastReconciledAt: FieldValue.serverTimestamp(),
+    lastUpdated: FieldValue.serverTimestamp(),
+  }, { merge: true });
+  return { totalCustomers, totalOrders, joinedToday: dailyCustomerJoins[todayKey] || 0 };
 }
 
 /** One normal document read. Aggregate counts run once only when the counter is first introduced. */
 export async function getOperationalTotals(): Promise<OperationalTotals> {
   const ref = totalsDocument();
   let snapshot = await ref.get();
-  if (!snapshot.exists || snapshot.get("initialized") !== true) {
-    await initializeTotalsOnce();
+  if (!snapshot.exists || snapshot.get("initialized") !== true || numberValue(snapshot.get("reconciliationVersion")) < RECONCILIATION_VERSION) {
+    await reconcileOperationalTotals();
     snapshot = await ref.get();
   }
 

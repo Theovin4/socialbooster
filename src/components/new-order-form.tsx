@@ -1,7 +1,7 @@
 "use client";
 
-import { useActionState, useMemo, useState } from "react";
-import { Calculator, CheckCircle2, Info, Link2, Search } from "lucide-react";
+import { useActionState, useState } from "react";
+import { Calculator, CheckCircle2, Info, Link2 } from "lucide-react";
 import { formatMoney } from "@/lib/money";
 import { Toast } from "./toast";
 import type { OrderActionState } from "@/app/dashboard/orders/actions";
@@ -16,17 +16,9 @@ function serviceDescription(service: OrderService) {
 }
 
 export function NewOrderForm({ services, selectedId, action }: { services: OrderService[]; selectedId?: string; action: (previous: OrderActionState, formData: FormData) => Promise<OrderActionState> }) {
-  const selected = services.find((item) => item.id === selectedId);
-  const [category, setCategory] = useState(selected?.category || "");
   const [serviceId, setServiceId] = useState(selectedId || "");
-  const [query, setQuery] = useState("");
   const [quantity, setQuantity] = useState("");
   const [state, formAction, pending] = useActionState(action, { status: "idle", message: "" } as OrderActionState);
-  const categories = useMemo(() => Array.from(new Set(services.map((item) => item.category))).sort((a, b) => a.localeCompare(b)), [services]);
-  const categoryServices = useMemo(() => {
-    const value = query.trim().toLowerCase();
-    return services.filter((item) => item.category === category && (!value || `${item.name} ${item.id}`.toLowerCase().includes(value)));
-  }, [category, query, services]);
   const service = services.find((item) => item.id === serviceId);
   const numericQuantity = Number(quantity || 0);
   const charge = service && Number.isFinite(numericQuantity) ? Math.ceil(service.rateMinor * numericQuantity / 1000) : 0;
@@ -35,9 +27,7 @@ export function NewOrderForm({ services, selectedId, action }: { services: Order
   return <div className="glass card order-form-card">{state.status === "error" && state.message ? <Toast key={state.message} kind="error" title="Order not submitted" message={state.message} /> : null}<form action={formAction} className="order-form">
     <div className="order-step"><span>1</span><div><strong>Choose a service</strong></div></div>
     <div className="form-grid">
-      <label>Category<select className="field" value={category} onChange={(event) => { setCategory(event.target.value); setServiceId(""); setQuantity(""); setQuery(""); }} required><option value="">Select a category</option>{categories.map((item) => <option value={item} key={item}>{item}</option>)}</select></label>
-      <label>Find a service<div className="field-with-icon"><Search size={18} /><input className="field" value={query} onChange={(event) => setQuery(event.target.value)} placeholder={category ? "Search this category" : "Choose a category first"} disabled={!category} /></div></label>
-      <label className="form-span">Service<select className="field" name="serviceId" value={serviceId} onChange={(event) => { setServiceId(event.target.value); setQuantity(""); }} required disabled={!category}><option value="">{category ? `Choose a service (${categoryServices.length.toLocaleString("en-NG")} available)` : "Choose a category first"}</option>{categoryServices.map((item) => <option value={item.id} key={item.id}>{item.name} — {formatMoney(BigInt(item.rateMinor), "NGN")}/1,000</option>)}</select></label>
+      <label className="form-span">Service<select className="field" name="serviceId" value={serviceId} onChange={(event) => { setServiceId(event.target.value); setQuantity(""); }} required><option value="">Choose from this page ({services.length.toLocaleString("en-NG")} available)</option>{services.map((item) => <option value={item.id} key={item.id}>{item.category} · {item.name} — {formatMoney(BigInt(item.rateMinor), "NGN")}/1,000</option>)}</select></label>
     </div>
     {service ? <section className="service-description" aria-live="polite"><div className="service-description-title"><Info size={20} /><div><span className="eyebrow">Service description</span><h2>{service.name}</h2></div></div><p>{serviceDescription(service)}</p><dl><div><dt>Rate</dt><dd>{formatMoney(BigInt(service.rateMinor), "NGN")} / 1,000</dd></div><div><dt>Minimum</dt><dd>{service.min.toLocaleString("en-NG")}</dd></div><div><dt>Maximum</dt><dd>{service.max.toLocaleString("en-NG")}</dd></div><div><dt>Refill</dt><dd>{service.refill ? "Available" : "Not included"}</dd></div></dl></section> : null}
     <div className="order-step"><span>2</span><div><strong>Order details</strong></div></div>

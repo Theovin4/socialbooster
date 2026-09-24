@@ -53,8 +53,7 @@ export async function loadFinanceData(
     .orderBy("createdAt", "desc")
     .limit(limit);
 
-  const [ordersSnapshot, transactionsSnapshot, walletAggregate] =
-    await Promise.all([
+  const settled = await Promise.allSettled([
       ordersQuery.get(),
       transactionsQuery.get(),
       db
@@ -63,8 +62,22 @@ export async function loadFinanceData(
         .aggregate({ total: AggregateField.sum("availableMinor") })
         .get(),
     ]);
+  const ordersSnapshot = settled[0].status === "fulfilled" ? settled[0].value : null;
+  const transactionsSnapshot = settled[1].status === "fulfilled" ? settled[1].value : null;
+  const walletAggregate = settled[2].status === "fulfilled" ? settled[2].value : null;
+  const unavailable = [
+    ordersSnapshot ? null : "orders",
+    transactionsSnapshot ? null : "wallet activity",
+    walletAggregate ? null : "wallet balance",
+  ].filter((item): item is string => Boolean(item));
+  settled.forEach((result, index) => {
+    if (result.status === "rejected") console.error("[finance-dashboard] dataset unavailable", {
+      dataset: ["orders", "wallet activity", "wallet balance"][index],
+      error: result.reason instanceof Error ? result.reason.message : "Unknown error",
+    });
+  });
 
-  const orders: FinanceOrder[] = ordersSnapshot.docs
+  const orders: FinanceOrder[] = (ordersSnapshot?.docs || [])
     .map((doc) => ({
       id: doc.id,
       createdAt: date(doc.get("createdAt")),
@@ -87,7 +100,7 @@ export async function loadFinanceData(
         filters.status === "all" ||
         item.status === filters.status,
     );
-  const transactions: FinanceTransaction[] = transactionsSnapshot.docs
+  const transactions: FinanceTransaction[] = (transactionsSnapshot?.docs || [])
     .map((doc) => ({
       id: doc.id,
       createdAt: date(doc.get("createdAt")),
@@ -97,7 +110,7 @@ export async function loadFinanceData(
       reference: String(doc.get("reference") || ""),
     }))
     .filter((item) => item.currency === "NGN");
-  const walletLiabilityMinor = Number(walletAggregate.data().total || 0);
+  const walletLiabilityMinor = walletAggregate ? Number(walletAggregate.data().total || 0) : 0;
 
   return {
     orders,
@@ -105,7 +118,13 @@ export async function loadFinanceData(
     walletLiabilityMinor,
     period,
     limit,
+    availability: {
+      orders: Boolean(ordersSnapshot),
+      transactions: Boolean(transactionsSnapshot),
+      wallet: Boolean(walletAggregate),
+      unavailable,
+    },
     truncated:
-      ordersSnapshot.size === limit || transactionsSnapshot.size === limit,
+      (ordersSnapshot?.size || 0) === limit || (transactionsSnapshot?.size || 0) === limit,
   };
 }

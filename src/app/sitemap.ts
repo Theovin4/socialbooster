@@ -2,7 +2,7 @@ import type { MetadataRoute } from "next";
 import { guides } from "@/lib/content";
 import { getActiveServiceCatalog } from "@/lib/service-catalog";
 const siteUrl = "https://www.socialbooster.net.ng";
-const contentUpdated = new Date("2026-08-29T00:00:00+01:00");
+const contentUpdated = new Date("2026-09-24T00:00:00+01:00");
 const routes = ["", "services", "pricing", "api-docs", "how-it-works", "africa", "blog", "about", "editorial-policy", "contact", "faq", "terms", "privacy", "refund-policy", "acceptable-use", "cookie-policy"];
 export default async function sitemap(): Promise<MetadataRoute.Sitemap> {
   const staticRoutes: MetadataRoute.Sitemap = routes.map((path) => ({ url: `${siteUrl}/${path}`, lastModified: contentUpdated, changeFrequency: path === "" || path === "services" ? "daily" : "monthly", priority: path === "" ? 1 : path === "services" ? .9 : .6 }));

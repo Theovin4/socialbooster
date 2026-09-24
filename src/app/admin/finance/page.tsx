@@ -39,6 +39,9 @@ export default async function FinancePage({
     data.transactions,
     data.walletLiabilityMinor,
   );
+  const ordersAvailable = data.availability.orders;
+  const transactionsAvailable = data.availability.transactions;
+  const walletAvailable = data.availability.wallet;
   const byDay = new Map<string, number>();
   for (const order of data.orders) {
     if (!order.createdAt) continue;
@@ -73,30 +76,26 @@ export default async function FinancePage({
     ...(filters.from ? { from: filters.from } : {}),
     ...(filters.to ? { to: filters.to } : {}),
   }).toString();
-  const cards = [
+  const cards: Array<[string, number | null]> = [
     [
       "Customer deposits",
-      summary.depositsMinor,
-      "Cash funded into customer wallets",
+      transactionsAvailable ? summary.depositsMinor : null,
     ],
-    ["Order value", summary.orderValueMinor, "Customer charges before refunds"],
-    ["Net sales", summary.netSalesMinor, "Order value less customer refunds"],
+    ["Order value", ordersAvailable ? summary.orderValueMinor : null],
+    ["Net sales", ordersAvailable && transactionsAvailable ? summary.netSalesMinor : null],
     [
       "Capital deployed",
-      summary.capitalDeployedMinor,
-      "Recorded cost of accepted orders",
+      ordersAvailable ? summary.capitalDeployedMinor : null,
     ],
     [
       "Gross profit",
-      summary.grossProfitMinor,
-      "Net sales less deployed capital",
+      ordersAvailable && transactionsAvailable ? summary.grossProfitMinor : null,
     ],
     [
       "Wallet liability",
-      summary.walletLiabilityMinor,
-      "Unused customer balances",
+      walletAvailable ? summary.walletLiabilityMinor : null,
     ],
-  ] as const;
+  ];
   return (
     <AppShell admin>
       <div className="section-head">
@@ -156,6 +155,14 @@ export default async function FinancePage({
           Reset
         </Link>
       </form>
+      {data.availability.unavailable.length ? (
+        <div className="notice" style={{ marginTop: 18 }}>
+          <strong>Some finance metrics are being refreshed.</strong>
+          <p className="muted" style={{ marginBottom: 0 }}>
+            Available records remain visible. The unavailable section will return automatically; no wallet or payment data was changed.
+          </p>
+        </div>
+      ) : null}
       {data.truncated ? (
         <div className="notice" style={{ marginTop: 18 }}>
           <strong>Quota-safe report view</strong>
@@ -171,30 +178,30 @@ export default async function FinancePage({
         {cards.map(([label, value]) => (
           <article className="glass card stat-card" key={label}>
             <span className="muted">{label}</span>
-            <strong className="stat-value finance-value">{money(value)}</strong>
+            <strong className="stat-value finance-value">{value === null ? "Unavailable" : money(value)}</strong>
           </article>
         ))}
       </div>
       <div className="finance-kpis compact">
         <article className="glass card">
           <span className="muted">Gross margin</span>
-          <strong>{(summary.grossMarginBps / 100).toFixed(1)}%</strong>
+          <strong>{ordersAvailable && transactionsAvailable ? `${(summary.grossMarginBps / 100).toFixed(1)}%` : "Unavailable"}</strong>
         </article>
         <article className="glass card">
           <span className="muted">Refunds</span>
-          <strong>{money(summary.refundsMinor)}</strong>
+          <strong>{transactionsAvailable ? money(summary.refundsMinor) : "Unavailable"}</strong>
         </article>
         <article className="glass card">
           <span className="muted">Active capital</span>
-          <strong>{money(summary.activeCapitalMinor)}</strong>
+          <strong>{ordersAvailable ? money(summary.activeCapitalMinor) : "Unavailable"}</strong>
         </article>
         <article className="glass card">
           <span className="muted">Orders</span>
-          <strong>{summary.orderCount.toLocaleString("en-NG")}</strong>
+          <strong>{ordersAvailable ? summary.orderCount.toLocaleString("en-NG") : "Unavailable"}</strong>
         </article>
         <article className="glass card">
           <span className="muted">Completed</span>
-          <strong>{summary.completedOrders.toLocaleString("en-NG")}</strong>
+          <strong>{ordersAvailable ? summary.completedOrders.toLocaleString("en-NG") : "Unavailable"}</strong>
         </article>
       </div>
       <div className="form-grid" style={{ marginTop: 22 }}>
@@ -220,7 +227,7 @@ export default async function FinancePage({
               ))}
             </div>
           ) : (
-            <p className="muted">No order activity in this period.</p>
+            <p className="muted">{ordersAvailable ? "No order activity in this period." : "Order activity is being refreshed."}</p>
           )}
         </section>
         <section className="glass card">
@@ -242,7 +249,7 @@ export default async function FinancePage({
               </div>
             ))
           ) : (
-            <p className="muted">No category activity in this period.</p>
+            <p className="muted">{ordersAvailable ? "No category activity in this period." : "Category activity is being refreshed."}</p>
           )}
         </section>
       </div>

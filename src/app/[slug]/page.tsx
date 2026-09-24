@@ -7,7 +7,7 @@ import { SiteFooter } from "@/components/site-footer";
 
 type Section = { heading: string; paragraphs?: string[]; bullets?: string[] };
 type Page = { title: string; lead: string; sections: Section[] };
-const updated = "23 September 2026";
+const updated = "24 September 2026";
 const business = {
   legalName: "Elysium Enterprise",
   registration: "Registered with the Corporate Affairs Commission; registration number available to competent authorities and verified counterparties upon lawful request.",
