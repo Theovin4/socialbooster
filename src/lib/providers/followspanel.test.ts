@@ -42,7 +42,7 @@ describe("FollowsPanelClient", () => {
 
   it("accepts nested and aliased catalogue fields", async () => {
     vi.stubGlobal("fetch", vi.fn().mockResolvedValue(new Response(JSON.stringify({ data: { services: [
-      { id: "31", title: "Post likes", price: "NGN 1,250.50", minimum: "10", maximum: "5 000", category_name: "Social" },
+      { service: "Post likes", id: "31", title: "Post likes", price: "NGN 1,250.50", minimum: "10", maximum: "5 000", category_name: "Social" },
     ] } }), { status: 200 })));
     const services = await new FollowsPanelClient("https://provider.test", "secret").services();
     expect(services[0]).toMatchObject({ service: 31, name: "Post likes", rate: "1250.50", min: 10, max: 5000, category: "Social" });

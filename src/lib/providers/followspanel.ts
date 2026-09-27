@@ -9,12 +9,15 @@ const booleanFlag = z.preprocess((value) => {
 const decimalRate = z.preprocess((value) => String(value ?? "").replaceAll(",", "").replace(/[^\d.]/g, "").trim(), z.string().regex(/^\d+(\.\d+)?$/).refine((value) => Number(value) > 0, "Rate must be positive"));
 const positiveInteger = z.preprocess((value) => String(value ?? "").replace(/[\s,]/g, "").trim(), z.coerce.number().int().positive());
 const minimumInteger = z.preprocess((value) => value == null || value === "" ? "1" : String(value).replace(/[\s,]/g, "").trim(), z.coerce.number().int().nonnegative());
+function numericServiceId(...values: unknown[]) {
+  return values.find((value) => /^\d+$/.test(String(value ?? "").replace(/[\s,]/g, "").trim()));
+}
 const serviceSchema = z.preprocess((value) => {
   if (!value || typeof value !== "object" || Array.isArray(value)) return value;
   const row = value as Record<string, unknown>;
   return {
     ...row,
-    service: row.service ?? row.id ?? row.service_id ?? row.sid,
+    service: numericServiceId(row.service, row.id, row.service_id, row.sid),
     name: row.name ?? row.title ?? row.service_name ?? row.service_title,
     rate: row.rate ?? row.price ?? row.cost,
     min: row.min ?? row.minimum ?? row.min_order ?? row.minOrder,
