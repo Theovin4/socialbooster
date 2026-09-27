@@ -31,4 +31,14 @@ describe("StandardPanelClient", () => {
     expect(providerServiceDocumentId("smmworld", 10)).toBe("smmworld_10");
     expect(normalizeProviderKey(undefined)).toBe("followspanel");
   });
+
+  it("skips zero-priced rows without rejecting the valid catalogue", async () => {
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(new Response(JSON.stringify([
+      { service: 1, name: "Unavailable", type: "Default", rate: "0", min: 10, max: 1000, category: "Video" },
+      { service: 2, name: "Available", type: "Default", rate: "1.25", min: 10, max: 1000, category: "Video" },
+    ]), { status: 200 })));
+    const services = await new StandardPanelClient("https://provider.test", "secret", "json").services();
+    expect(services).toHaveLength(1);
+    expect(services[0]).toMatchObject({ service: 2, rate: "1.25" });
+  });
 });

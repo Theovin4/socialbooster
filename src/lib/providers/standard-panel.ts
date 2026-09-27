@@ -2,12 +2,17 @@ import { randomUUID } from "node:crypto";
 import { z } from "zod";
 import { ProviderError } from "./followspanel";
 
-const flag = z.union([z.boolean(), z.coerce.number().int().min(0).transform(Boolean)]).optional().default(false);
+const flag = z.preprocess((value) => {
+  if (typeof value === "string") return ["1", "true", "yes", "on", "available"].includes(value.trim().toLowerCase());
+  if (typeof value === "number") return value > 0;
+  return value;
+}, z.boolean().optional().default(false));
+const decimalRate = z.preprocess((value) => String(value ?? "").replaceAll(",", "").replace(/[^\d.]/g, "").trim(), z.string().regex(/^\d+(\.\d+)?$/).refine((rate) => Number(rate) > 0, "Rate must be positive"));
 const serviceSchema = z.object({
   service: z.coerce.number().int().positive(),
   name: z.string().min(1),
   type: z.string().min(1),
-  rate: z.coerce.string().regex(/^\d+(\.\d+)?$/),
+  rate: decimalRate,
   min: z.coerce.number().int().nonnegative(),
   max: z.coerce.number().int().positive(),
   category: z.string().min(1),
@@ -57,7 +62,19 @@ export class StandardPanelClient {
     throw new ProviderError(last instanceof Error ? last.message : "Unknown provider error", "NETWORK", true, requestId);
   }
 
-  services() { return this.post("services").then((data) => z.array(serviceSchema).parse(data)); }
+  services() { return this.post("services").then((data) => {
+    const root = data && typeof data === "object" && !Array.isArray(data) ? data as Record<string, unknown> : null;
+    const payload = Array.isArray(data) ? data : root?.services ?? root?.data;
+    const rows = z.array(z.unknown()).parse(payload), valid: StandardPanelService[] = [];
+    let skipped = 0;
+    for (const row of rows) {
+      const parsed = serviceSchema.safeParse(row);
+      if (parsed.success) valid.push(parsed.data); else skipped += 1;
+    }
+    if (!valid.length && rows.length) throw new ProviderError("The service catalogue format is not supported", "INVALID_CATALOGUE");
+    if (skipped) console.warn("[standard-panel] skipped invalid catalogue rows", { skipped, received: rows.length });
+    return valid;
+  }); }
   balance() { return this.post("balance").then((data) => z.object({ balance: z.coerce.string(), currency: z.string() }).parse(data)); }
   add(serviceId: number, link: string, quantity: number) { return this.post("add", { service: String(serviceId), link, quantity: String(quantity) }, false).then((data) => z.object({ order: z.coerce.number().int().positive() }).parse(data)); }
   status(orderId: number) { return this.post("status", { order: String(orderId) }).then((data) => statusSchema.parse(data)); }

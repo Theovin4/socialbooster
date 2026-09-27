@@ -53,7 +53,7 @@ export async function synchronizeProviderServices(providerKey: ProviderDefinitio
     // A later funded synchronization automatically re-enables them.
     const active = provider.key === "followspanel" ? existing?.active === true : providerFunded;
     if (existing?.pricingFingerprint === pricingFingerprint && existing?.pricingModel === "ngn_markup_v1" && existing?.active === active) continue;
-    const grossMarginBps = Number((sellingRateMinor - providerRateNgnMinor) * 10000n / sellingRateMinor);
+    const grossMarginBps = sellingRateMinor > 0n ? Number((sellingRateMinor - providerRateNgnMinor) * 10000n / sellingRateMinor) : 0;
     writer.set(db.collection("services").doc(id), { ...providerData, providerNativeRateMinor: Number(nativeRateMinor), providerRateMinor: Number(providerRateNgnMinor), providerRateNgnMinor: Number(providerRateNgnMinor), sellingCurrency: "NGN", sellingRateMinor: Number(sellingRateMinor), pricingModel: "ngn_markup_v1", pricingFingerprint, markupBps: Number(markupBps), grossMarginBps, active, autoImported: true, customSellingRateMinor: FieldValue.delete(), marginBps: FieldValue.delete(), updatedAt: FieldValue.serverTimestamp(), ...(existing ? {} : { createdAt: FieldValue.serverTimestamp() }) }, { merge: true });
     changed += 1; repriced += 1;
   }

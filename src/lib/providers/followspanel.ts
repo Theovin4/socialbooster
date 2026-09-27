@@ -1,22 +1,35 @@
 import { randomUUID } from "node:crypto";
 import { z } from "zod";
 
-const booleanFlag = z.union([
-  z.boolean(),
-  z.coerce.number().int().min(0).max(1).transform(Boolean),
-  z.enum(["true", "false"]).transform((value) => value === "true"),
-]).optional().default(false);
-const serviceSchema = z.object({
+const booleanFlag = z.preprocess((value) => {
+  if (typeof value === "string") return ["1", "true", "yes", "on", "available"].includes(value.trim().toLowerCase());
+  if (typeof value === "number") return value > 0;
+  return value;
+}, z.boolean().optional().default(false));
+const decimalRate = z.preprocess((value) => String(value ?? "").replaceAll(",", "").replace(/[^\d.]/g, "").trim(), z.string().regex(/^\d+(\.\d+)?$/).refine((value) => Number(value) > 0, "Rate must be positive"));
+const serviceSchema = z.preprocess((value) => {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return value;
+  const row = value as Record<string, unknown>;
+  return {
+    ...row,
+    service: row.service ?? row.id ?? row.service_id,
+    name: row.name ?? row.title ?? row.service_name,
+    rate: row.rate ?? row.price,
+    min: row.min ?? row.minimum ?? row.min_order,
+    max: row.max ?? row.maximum ?? row.max_order,
+    category: row.category ?? row.category_name,
+  };
+}, z.object({
   service: z.coerce.number().int().positive(),
-  name: z.string().trim().min(1),
-  type: z.string().trim().min(1).optional().default("Default"),
-  rate: z.preprocess((value) => String(value ?? "").replaceAll(",", "").trim(), z.string().regex(/^\d+(\.\d+)?$/)),
+  name: z.coerce.string().trim().min(1),
+  type: z.coerce.string().trim().min(1).optional().default("Default"),
+  rate: decimalRate,
   min: z.coerce.number().int().nonnegative().optional().default(1),
   max: z.coerce.number().int().positive(),
-  category: z.string().trim().min(1).optional().default("Other services"),
+  category: z.coerce.string().trim().min(1).optional().default("Other services"),
   refill: booleanFlag,
   cancel: booleanFlag,
-}).refine((value) => value.max >= value.min, "Maximum must be greater than or equal to minimum");
+}).refine((value) => value.max >= value.min, "Maximum must be greater than or equal to minimum"));
 const statusSchema = z.object({ charge: z.string().optional(), start_count: z.string().optional(), status: z.string(), remains: z.string().optional(), currency: z.string().optional() });
 const refillSchema = z.object({ refill: z.coerce.number().int().positive() });
 const refillStatusSchema = z.object({ status: z.string().min(1) });
@@ -71,9 +84,9 @@ export class FollowsPanelClient {
   }
 
   services() { return this.post("services").then((data) => {
-    const payload = data && typeof data === "object" && !Array.isArray(data)
-      ? ((data as { services?: unknown; data?: unknown }).services ?? (data as { data?: unknown }).data)
-      : data;
+    const root = data && typeof data === "object" && !Array.isArray(data) ? data as Record<string, unknown> : null;
+    const nested = root?.data && typeof root.data === "object" && !Array.isArray(root.data) ? root.data as Record<string, unknown> : null;
+    const payload = Array.isArray(data) ? data : root?.services ?? root?.result ?? (Array.isArray(root?.data) ? root.data : nested?.services);
     const rows = z.array(z.unknown()).parse(payload), valid: z.infer<typeof serviceSchema>[] = [];
     let skipped = 0;
     for (const row of rows) {

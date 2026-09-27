@@ -40,6 +40,14 @@ describe("FollowsPanelClient", () => {
     expect(services[0]).toMatchObject({ service: 27, name: "Page followers", rate: "1250.50", min: 1, max: 50000, type: "Default", category: "Other services" });
   });
 
+  it("accepts nested and aliased catalogue fields", async () => {
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(new Response(JSON.stringify({ data: { services: [
+      { id: "31", title: "Post likes", price: "NGN 1,250.50", minimum: "10", maximum: "5000", category_name: "Social" },
+    ] } }), { status: 200 })));
+    const services = await new FollowsPanelClient("https://provider.test", "secret").services();
+    expect(services[0]).toMatchObject({ service: 31, name: "Post likes", rate: "1250.50", min: 10, max: 5000, category: "Social" });
+  });
+
   it("keeps valid live order statuses when another order is unavailable", async () => {
     vi.stubGlobal("fetch", vi.fn().mockResolvedValue(new Response(JSON.stringify({ "101": { status: "In progress", start_count: "517", remains: "120" }, "102": { error: "Incorrect order ID" } }), { status: 200 })));
     const statuses = await new FollowsPanelClient("https://provider.test", "secret").statuses([101, 102]);
