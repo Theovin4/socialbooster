@@ -95,7 +95,13 @@ export class FollowsPanelClient {
       const parsed = serviceSchema.safeParse(row);
       if (parsed.success) valid.push(parsed.data); else skipped += 1;
     }
-    if (!valid.length && rows.length) throw new ProviderError("The service catalogue format is not supported", "INVALID_CATALOGUE");
+    if (!valid.length && rows.length) {
+      const issueSummary = Array.from(new Set(rows.slice(0, 5).flatMap((row) => {
+        const parsed = serviceSchema.safeParse(row);
+        return parsed.success ? [] : parsed.error.issues.map((issue) => `${issue.path.join(".") || "row"}:${issue.code}`);
+      }))).slice(0, 8).join(", ");
+      throw new ProviderError(`The service catalogue format is not supported${issueSummary ? ` (${issueSummary})` : ""}`, "INVALID_CATALOGUE");
+    }
     if (skipped) console.warn("[followspanel] skipped invalid catalogue rows", { skipped, received: rows.length });
     return valid;
   }); }
