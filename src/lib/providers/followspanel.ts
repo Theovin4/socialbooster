@@ -10,7 +10,10 @@ const decimalRate = z.preprocess((value) => String(value ?? "").replaceAll(",", 
 const positiveInteger = z.preprocess((value) => String(value ?? "").replace(/[\s,]/g, "").trim(), z.coerce.number().int().positive());
 const minimumInteger = z.preprocess((value) => value == null || value === "" ? "1" : String(value).replace(/[\s,]/g, "").trim(), z.coerce.number().int().nonnegative());
 function numericServiceId(...values: unknown[]) {
-  return values.find((value) => /^\d+$/.test(String(value ?? "").replace(/[\s,]/g, "").trim()));
+  return values.find((value) => {
+    const normalized = String(value ?? "").replace(/[\s,]/g, "").trim();
+    return /^\d+$/.test(normalized) && Number(normalized) > 0;
+  });
 }
 const serviceSchema = z.preprocess((value) => {
   if (!value || typeof value !== "object" || Array.isArray(value)) return value;

@@ -48,6 +48,14 @@ describe("FollowsPanelClient", () => {
     expect(services[0]).toMatchObject({ service: 31, name: "Post likes", rate: "1250.50", min: 10, max: 5000, category: "Social" });
   });
 
+  it("ignores a zero service placeholder when a positive identifier is available", async () => {
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(new Response(JSON.stringify([
+      { service: 0, id: "42", name: "Profile visits", rate: "10", min: "10", max: "1000" },
+    ]), { status: 200 })));
+    const services = await new FollowsPanelClient("https://provider.test", "secret").services();
+    expect(services[0]).toMatchObject({ service: 42, name: "Profile visits" });
+  });
+
   it("keeps valid live order statuses when another order is unavailable", async () => {
     vi.stubGlobal("fetch", vi.fn().mockResolvedValue(new Response(JSON.stringify({ "101": { status: "In progress", start_count: "517", remains: "120" }, "102": { error: "Incorrect order ID" } }), { status: 200 })));
     const statuses = await new FollowsPanelClient("https://provider.test", "secret").statuses([101, 102]);
