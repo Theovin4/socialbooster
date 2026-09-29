@@ -1,10 +1,10 @@
 "use client";
 
-import { FormEvent, KeyboardEvent, useState } from "react";
+import { FormEvent, KeyboardEvent, useCallback, useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
 import { FirebaseError } from "firebase/app";
-import { createUserWithEmailAndPassword, GoogleAuthProvider, inMemoryPersistence, sendEmailVerification, sendPasswordResetEmail, setPersistence, signInWithEmailAndPassword, signInWithPopup, updateProfile, type User } from "firebase/auth";
+import { browserSessionPersistence, createUserWithEmailAndPassword, getRedirectResult, GoogleAuthProvider, inMemoryPersistence, sendEmailVerification, sendPasswordResetEmail, setPersistence, signInWithEmailAndPassword, signInWithPopup, signInWithRedirect, updateProfile, type User } from "firebase/auth";
 import { Eye, EyeOff } from "lucide-react";
 import { firebaseAuth } from "@/lib/firebase/client";
 import { Toast, type ToastKind } from "./toast";
@@ -19,6 +19,7 @@ function messageFor(error: unknown, mode: "login" | "register" | "reset"): Notic
   if (code === "auth/too-many-requests") return { kind: "error", title: "Please wait before retrying", message: "Too many attempts were made. Wait a few minutes or reset your password." };
   if (code === "auth/popup-closed-by-user" || code === "auth/cancelled-popup-request") return { kind: "info", title: "Google sign-in cancelled", message: "No account changes were made. You can try again when ready." };
   if (code === "auth/popup-blocked") return { kind: "error", title: "Google window was blocked", message: "Allow pop-ups for Social Booster, then try again." };
+  if (code === "auth/web-storage-unsupported") return { kind: "error", title: "Private browsing restriction", message: "Allow cookies for Social Booster or open the site in a standard browser tab, then try again." };
   if (code === "auth/network-request-failed") return { kind: "error", title: "Connection interrupted", message: "We could not reach Google. Check your connection and try again." };
   if (code === "auth/unauthorized-domain") return { kind: "error", title: "Google sign-in is not available", message: "This website domain must be approved in Firebase Authentication before Google sign-in can continue." };
   if (code === "auth/operation-not-allowed") return { kind: "info", title: "Google sign-in is being prepared", message: "Please use email and password for now. Your account remains available." };
@@ -30,21 +31,47 @@ function messageFor(error: unknown, mode: "login" | "register" | "reset"): Notic
 export function AuthForm({ mode, initialNotice, returnTo }: { mode: "login" | "register" | "reset"; initialNotice?: Notice; returnTo?: string }) {
   const router = useRouter(), [notice, setNotice] = useState<Notice | undefined>(initialNotice), [busy, setBusy] = useState(false), [showPassword, setShowPassword] = useState(false), [capsLock, setCapsLock] = useState(false);
   function checkCaps(event: KeyboardEvent<HTMLInputElement>) { setCapsLock(event.getModifierState("CapsLock")); }
-  function destination(admin?: boolean) { if (returnTo?.startsWith("/") && !returnTo.startsWith("//") && (admin || !returnTo.startsWith("/admin"))) return returnTo; return admin ? "/admin?notice=welcome" : "/dashboard?notice=welcome"; }
-  async function establishSession(user: User) {
+  const destination = useCallback((admin?: boolean) => { if (returnTo?.startsWith("/") && !returnTo.startsWith("//") && (admin || !returnTo.startsWith("/admin"))) return returnTo; return admin ? "/admin?notice=welcome" : "/dashboard?notice=welcome"; }, [returnTo]);
+  const establishSession = useCallback(async (user: User) => {
     const response = await fetch("/api/auth/session", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ idToken: await user.getIdToken(true) }) });
     if (!response.ok) { console.error("[auth] session endpoint rejected sign-in", { status: response.status }); throw new Error("SESSION_FAILED"); }
     const session = await response.json() as { admin?: boolean };
     await firebaseAuth().signOut();
     router.push(destination(session.admin)); router.refresh();
-  }
+  }, [destination, router]);
+  useEffect(() => {
+    let active = true;
+    getRedirectResult(firebaseAuth()).then(async (credential) => {
+      if (!active || !credential) return;
+      setBusy(true); setNotice(undefined);
+      await establishSession(credential.user);
+    }).catch((error) => {
+      if (!active) return;
+      setNotice(messageFor(error, mode)); setBusy(false);
+    });
+    return () => { active = false; };
+  }, [establishSession, mode]);
   async function googleSignIn() {
     setBusy(true); setNotice(undefined);
     try {
-      const auth = firebaseAuth(); await setPersistence(auth, inMemoryPersistence);
+      const auth = firebaseAuth();
       const provider = new GoogleAuthProvider(); provider.setCustomParameters({ prompt: "select_account" });
-      const credential = await signInWithPopup(auth, provider);
-      await establishSession(credential.user);
+      const mobile = window.matchMedia("(max-width: 760px)").matches || /Android|iPhone|iPad|iPod|Mobile/i.test(navigator.userAgent);
+      if (mobile) {
+        await setPersistence(auth, browserSessionPersistence);
+        await signInWithRedirect(auth, provider);
+        return;
+      }
+      await setPersistence(auth, inMemoryPersistence);
+      try {
+        const credential = await signInWithPopup(auth, provider);
+        await establishSession(credential.user);
+      } catch (error) {
+        const code = error instanceof FirebaseError ? error.code : "";
+        if (!["auth/popup-blocked", "auth/operation-not-supported-in-this-environment"].includes(code)) throw error;
+        await setPersistence(auth, browserSessionPersistence);
+        await signInWithRedirect(auth, provider);
+      }
     } catch (error) { setNotice(messageFor(error, mode)); setBusy(false); }
   }
   async function submit(event: FormEvent<HTMLFormElement>) {

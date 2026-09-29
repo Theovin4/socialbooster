@@ -63,6 +63,13 @@ export async function createAndSubmitOrder(input: NewOrder) {
     });
     await orderRef.set({ status, providerErrorCode: error instanceof ProviderError ? error.code : "NETWORK", updatedAt: FieldValue.serverTimestamp() }, { merge: true });
     if (definitelyRejected) await postWallet({ userId: input.userId, type: "refund", deltaMinor: local.customerPriceMinor, currency: local.currency, idempotencyKey: `refund:${orderRef.id}`, reference: orderRef.id, reason: "Provider rejected order submission" });
+    const customerMessage = definitelyRejected
+      ? `Order #${orderRef.id.slice(0, 8)} could not be accepted. The full charge has been returned to your wallet automatically.`
+      : `Order #${orderRef.id.slice(0, 8)} is being checked before another submission attempt. No duplicate order will be created.`;
+    await Promise.allSettled([
+      sendUserEmail(input.userId, { subject: `Order #${orderRef.id.slice(0, 8)} needs attention`, title: definitelyRejected ? "Order charge returned" : "Order confirmation in progress", message: customerMessage, buttonLabel: "View order", buttonUrl: `${process.env.NEXT_PUBLIC_APP_URL || "https://www.socialbooster.net.ng"}/dashboard/orders/${orderRef.id}` }),
+      sendAdminAlert({ subject: `Order submission review #${orderRef.id.slice(0, 8)}`, title: definitelyRejected ? "Order rejected and refunded" : "Order needs provider confirmation", message: `${String(local.serviceName)} · ${String(local.providerLabel)} · ${customerMessage}`, buttonLabel: "Review live order", buttonUrl: `${process.env.NEXT_PUBLIC_APP_URL || "https://www.socialbooster.net.ng"}/admin/provider` }),
+    ]);
     return { id: orderRef.id, status };
   }
 }

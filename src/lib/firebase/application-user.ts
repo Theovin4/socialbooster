@@ -8,7 +8,7 @@ export async function ensureApplicationUser(token: DecodedIdToken) {
   const db = adminDb(), userRef = db.collection("users").doc(token.uid), walletRef = db.collection("wallets").doc(token.uid), statsRef = totalsDocument();
   const normalizedEmail = token.email?.trim().toLowerCase() || null;
   const emailRef = normalizedEmail ? db.collection("customerEmailIndex").doc(createHash("sha256").update(normalizedEmail).digest("hex")) : null;
-  await db.runTransaction(async (transaction) => {
+  const created = await db.runTransaction(async (transaction) => {
     const [profile, wallet, emailIndex] = await Promise.all([
       transaction.get(userRef),
       transaction.get(walletRef),
@@ -33,5 +33,7 @@ export async function ensureApplicationUser(token: DecodedIdToken) {
     }
     else transaction.set(userRef, { emailVerified: token.email_verified === true, lastLoginAt: FieldValue.serverTimestamp(), updatedAt: FieldValue.serverTimestamp() }, { merge: true });
     if (!wallet.exists) transaction.create(walletRef, { userId: token.uid, currency: "NGN", availableMinor: 0, reservedMinor: 0, balanceMinor: 0, version: 1, createdAt: FieldValue.serverTimestamp(), updatedAt: FieldValue.serverTimestamp() });
+    return !profile.exists;
   });
+  return { created };
 }
