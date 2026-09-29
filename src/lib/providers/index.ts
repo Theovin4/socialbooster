@@ -14,8 +14,10 @@ export function normalizeProviderKey(value: unknown): ProviderKey {
   return value === "nitro" || value === "smmworld" ? value : "followspanel";
 }
 
-export function providerServiceDocumentId(provider: ProviderKey, serviceId: number) {
-  return provider === "followspanel" ? String(serviceId) : `${provider}_${serviceId}`;
+export function providerServiceDocumentId(provider: ProviderKey, serviceId: number | string) {
+  const value = String(serviceId).trim();
+  if (provider === "followspanel") return /^\d+$/.test(value) ? value : `followspanel_${value}`;
+  return `${provider}_${value}`;
 }
 
 export function providerDefinitions(): ProviderDefinition[] {

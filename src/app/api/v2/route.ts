@@ -7,7 +7,7 @@ import { customerOrderStatusLabel } from "@/lib/customer-order-status";
 import { getActiveServiceCatalog } from "@/lib/service-catalog";
 
 export const dynamic = "force-dynamic";
-const addSchema = z.object({ service: z.coerce.string().regex(/^(?:\d+|(?:nitro|smmworld)_\d+)$/), link: z.string().url().max(2048), quantity: z.coerce.number().int().positive(), idempotency_key: z.string().regex(/^[A-Za-z0-9_-]{8,80}$/).optional() });
+const addSchema = z.object({ service: z.coerce.string().regex(/^(?:\d+|followspanel_[A-Za-z0-9][A-Za-z0-9_-]{2,127}|(?:nitro|smmworld)_\d+)$/), link: z.string().url().max(2048), quantity: z.coerce.number().int().positive(), idempotency_key: z.string().regex(/^[A-Za-z0-9_-]{8,80}$/).optional() });
 
 async function input(request: Request) {
   const contentType = request.headers.get("content-type") || "";

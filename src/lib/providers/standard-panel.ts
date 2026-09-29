@@ -76,7 +76,11 @@ export class StandardPanelClient {
     return valid;
   }); }
   balance() { return this.post("balance").then((data) => z.object({ balance: z.coerce.string(), currency: z.string() }).parse(data)); }
-  add(serviceId: number, link: string, quantity: number) { return this.post("add", { service: String(serviceId), link, quantity: String(quantity) }, false).then((data) => z.object({ order: z.coerce.number().int().positive() }).parse(data)); }
+  add(serviceId: number | string, link: string, quantity: number) {
+    const normalized = Number(serviceId);
+    if (!Number.isSafeInteger(normalized) || normalized <= 0) return Promise.reject(new ProviderError("Invalid provider service identifier", "INVALID_SERVICE"));
+    return this.post("add", { service: String(normalized), link, quantity: String(quantity) }, false).then((data) => z.object({ order: z.coerce.number().int().positive() }).parse(data));
+  }
   status(orderId: number) { return this.post("status", { order: String(orderId) }).then((data) => statusSchema.parse(data)); }
   statuses(ids: number[]) { return this.post("status", { orders: ids.join(",") }).then((data) => {
     const source = z.record(z.string(), z.unknown()).parse(data), valid: Record<string, StandardPanelStatus> = {};

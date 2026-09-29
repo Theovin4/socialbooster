@@ -4,7 +4,7 @@ import { z } from "zod";
 import { requireUser } from "@/lib/firebase/session";
 import { createAndSubmitOrder, newOrderId } from "@/lib/orders";
 
-const orderSchema = z.object({ serviceId: z.string().regex(/^(?:\d+|(?:nitro|smmworld)_\d+)$/), link: z.string().url().max(2000), quantity: z.coerce.number().int().positive(), confirmed: z.literal("yes") });
+const orderSchema = z.object({ serviceId: z.string().regex(/^(?:\d+|followspanel_[A-Za-z0-9][A-Za-z0-9_-]{2,127}|(?:nitro|smmworld)_\d+)$/), link: z.string().url().max(2000), quantity: z.coerce.number().int().positive(), confirmed: z.literal("yes") });
 export type OrderActionState = { status: "idle" | "error"; message: string };
 export async function submitOrder(_previous: OrderActionState, formData: FormData): Promise<OrderActionState> {
   const user = await requireUser();

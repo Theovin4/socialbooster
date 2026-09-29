@@ -27,6 +27,7 @@ describe("StandardPanelClient", () => {
 
   it("keeps service IDs isolated by provider", () => {
     expect(providerServiceDocumentId("followspanel", 10)).toBe("10");
+    expect(providerServiceDocumentId("followspanel", "facebook-followers")).toBe("followspanel_facebook-followers");
     expect(providerServiceDocumentId("nitro", 10)).toBe("nitro_10");
     expect(providerServiceDocumentId("smmworld", 10)).toBe("smmworld_10");
     expect(normalizeProviderKey(undefined)).toBe("followspanel");

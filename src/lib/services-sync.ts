@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import { FieldPath, FieldValue } from "firebase-admin/firestore";
+import { FieldValue } from "firebase-admin/firestore";
 import { adminDb } from "./firebase/admin";
 import { configuredUsdToNgnRateMicros, convertMinor } from "./currency";
 import { DEFAULT_MARGIN_BPS, decimalToMinor, sellingPriceMinor } from "./money";
@@ -19,18 +19,14 @@ export async function synchronizeProviderServices(providerKey: ProviderDefinitio
   const db = adminDb();
   const providerCatalogue = db.collection("providerServices");
   const customerCatalogue = db.collection("services");
-  const providerQuery = provider.key === "followspanel"
-    ? providerCatalogue.where(FieldPath.documentId(), ">=", "0").where(FieldPath.documentId(), "<=", `9\uf8ff`)
-    : providerCatalogue.where("providerKey", "==", provider.key);
-  const serviceQuery = provider.key === "followspanel"
-    ? customerCatalogue.where(FieldPath.documentId(), ">=", "0").where(FieldPath.documentId(), "<=", `9\uf8ff`)
-    : customerCatalogue.where("providerKey", "==", provider.key);
+  const providerQuery = providerCatalogue.where("providerKey", "==", provider.key);
+  const serviceQuery = customerCatalogue.where("providerKey", "==", provider.key);
   const [providerSnapshot, serviceSnapshot] = await Promise.all([
     providerQuery.get(),
     serviceQuery.get(),
   ]);
-  const providers = new Map(providerSnapshot.docs.filter((doc) => provider.key !== "followspanel" || !doc.id.includes("_")).map((doc) => [doc.id, doc.data()]));
-  const services = new Map(serviceSnapshot.docs.filter((doc) => provider.key !== "followspanel" || !doc.id.includes("_")).map((doc) => [doc.id, doc.data()]));
+  const providers = new Map(providerSnapshot.docs.map((doc) => [doc.id, doc.data()]));
+  const services = new Map(serviceSnapshot.docs.map((doc) => [doc.id, doc.data()]));
   const writer = db.bulkWriter();
   writer.onWriteError((error) => error.failedAttempts < 3);
   const markupBps = DEFAULT_MARGIN_BPS, usdToNgn = configuredUsdToNgnRateMicros();
@@ -51,7 +47,7 @@ export async function synchronizeProviderServices(providerKey: ProviderDefinitio
     // Backup catalogues are safe to synchronize while unfunded, but their
     // services must not accept customer orders until the account has funds.
     // A later funded synchronization automatically re-enables them.
-    const active = provider.key === "followspanel" ? existing?.active === true : providerFunded;
+    const active = providerFunded;
     if (existing?.pricingFingerprint === pricingFingerprint && existing?.pricingModel === "ngn_markup_v1" && existing?.active === active) continue;
     const grossMarginBps = sellingRateMinor > 0n ? Number((sellingRateMinor - providerRateNgnMinor) * 10000n / sellingRateMinor) : 0;
     writer.set(db.collection("services").doc(id), { ...providerData, providerNativeRateMinor: Number(nativeRateMinor), providerRateMinor: Number(providerRateNgnMinor), providerRateNgnMinor: Number(providerRateNgnMinor), sellingCurrency: "NGN", sellingRateMinor: Number(sellingRateMinor), pricingModel: "ngn_markup_v1", pricingFingerprint, markupBps: Number(markupBps), grossMarginBps, active, autoImported: true, customSellingRateMinor: FieldValue.delete(), marginBps: FieldValue.delete(), updatedAt: FieldValue.serverTimestamp(), ...(existing ? {} : { createdAt: FieldValue.serverTimestamp() }) }, { merge: true });

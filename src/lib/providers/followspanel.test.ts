@@ -56,6 +56,14 @@ describe("FollowsPanelClient", () => {
     expect(services[0]).toMatchObject({ service: 42, name: "Profile visits" });
   });
 
+  it("accepts stable text service identifiers", async () => {
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(new Response(JSON.stringify([
+      { service: "facebook-page-followers-standard", name: "Page followers", rate: "10", min: "10", max: "1000" },
+    ]), { status: 200 })));
+    const services = await new FollowsPanelClient("https://provider.test", "secret").services();
+    expect(services[0]).toMatchObject({ service: "facebook-page-followers-standard", name: "Page followers" });
+  });
+
   it("keeps valid live order statuses when another order is unavailable", async () => {
     vi.stubGlobal("fetch", vi.fn().mockResolvedValue(new Response(JSON.stringify({ "101": { status: "In progress", start_count: "517", remains: "120" }, "102": { error: "Incorrect order ID" } }), { status: 200 })));
     const statuses = await new FollowsPanelClient("https://provider.test", "secret").statuses([101, 102]);

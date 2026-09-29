@@ -15,6 +15,12 @@ function numericServiceId(...values: unknown[]) {
     return /^\d+$/.test(normalized) && Number(normalized) > 0;
   });
 }
+function serviceIdentifier(row: Record<string, unknown>) {
+  const numeric = numericServiceId(row.service, row.id, row.service_id, row.sid, fieldValue(row, "serviceid", "idservice", "servicecode", "sid", "id"));
+  if (numeric != null) return numeric;
+  const service = String(row.service ?? "").trim();
+  return /^[A-Za-z0-9][A-Za-z0-9_-]{2,127}$/.test(service) ? service : undefined;
+}
 function fieldValue(row: Record<string, unknown>, ...aliases: string[]) {
   const normalized = new Map(Object.entries(row).map(([key, value]) => [key.toLowerCase().replace(/[^a-z0-9]/g, ""), value]));
   return aliases.map((alias) => normalized.get(alias)).find((value) => value != null && value !== "");
@@ -29,7 +35,7 @@ const serviceSchema = z.preprocess((value) => {
   const row = value as Record<string, unknown>;
   return {
     ...row,
-    service: numericServiceId(row.service, row.id, row.service_id, row.sid, fieldValue(row, "serviceid", "idservice", "servicecode", "sid", "id")),
+    service: serviceIdentifier(row),
     name: row.name ?? row.title ?? row.service_name ?? row.service_title ?? (typeof row.service === "string" && !/^\s*\d+\s*$/.test(row.service) ? row.service : undefined),
     rate: row.rate ?? row.price ?? row.cost,
     min: row.min ?? row.minimum ?? row.min_order ?? row.minOrder,
@@ -37,7 +43,7 @@ const serviceSchema = z.preprocess((value) => {
     category: row.category ?? row.category_name,
   };
 }, z.object({
-  service: positiveInteger,
+  service: z.union([positiveInteger, z.string().trim().regex(/^[A-Za-z0-9][A-Za-z0-9_-]{2,127}$/)]),
   name: z.coerce.string().trim().min(1),
   type: z.coerce.string().trim().min(1).optional().default("Default"),
   rate: decimalRate,
@@ -127,7 +133,7 @@ export class FollowsPanelClient {
     return valid;
   }); }
   balance() { return this.post("balance").then((data) => z.object({ balance: z.string(), currency: z.string() }).parse(data)); }
-  add(serviceId: number, link: string, quantity: number) { return this.post("add", { service: String(serviceId), link, quantity: String(quantity) }, false).then((data) => z.object({ order: z.coerce.number().int().positive() }).parse(data)); }
+  add(serviceId: number | string, link: string, quantity: number) { return this.post("add", { service: String(serviceId), link, quantity: String(quantity) }, false).then((data) => z.object({ order: z.coerce.number().int().positive() }).parse(data)); }
   status(orderId: number) { return this.post("status", { order: String(orderId) }).then((data) => statusSchema.parse(data)); }
   statuses(ids: number[]) { return this.post("status", { orders: ids.join(",") }).then((data) => {
     const source = z.record(z.string(), z.unknown()).parse(data), valid: Record<string, z.infer<typeof statusSchema>> = {};

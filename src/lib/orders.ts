@@ -12,7 +12,7 @@ import { recordNewOrder } from "./firebase/stats";
 export type NewOrder = { userId: string; serviceId: string; link: string; quantity: number; idempotencyKey: string };
 export async function createAndSubmitOrder(input: NewOrder) {
   if (process.env.ORDER_SUBMISSION_ENABLED !== "true") throw new Error("Order submission is not enabled");
-  if (!/^(?:\d+|(?:nitro|smmworld)_\d+)$/.test(input.serviceId) || !Number.isSafeInteger(input.quantity) || input.quantity <= 0) throw new Error("Invalid order");
+  if (!/^(?:\d+|followspanel_[A-Za-z0-9][A-Za-z0-9_-]{2,127}|(?:nitro|smmworld)_\d+)$/.test(input.serviceId) || !Number.isSafeInteger(input.quantity) || input.quantity <= 0) throw new Error("Invalid order");
   const url = new URL(input.link); if (!['http:', 'https:'].includes(url.protocol)) throw new Error("Invalid target URL");
   const db = adminDb(), orderRef = db.collection("orders").doc(input.idempotencyKey), walletRef = db.collection("wallets").doc(input.userId), serviceRef = db.collection("services").doc(input.serviceId);
   const local = await db.runTransaction(async (transaction) => {
@@ -43,7 +43,7 @@ export async function createAndSubmitOrder(input: NewOrder) {
   try {
     const provider = getProvider(local.providerKey);
     if (!provider.configured) throw new ProviderError("Selected provider is not configured", "NOT_CONFIGURED");
-    const result = await provider.client.add(Number(local.providerServiceId), input.link, input.quantity);
+    const result = await provider.client.add(local.providerServiceId, input.link, input.quantity);
     console.info("[order-submit] provider accepted", { orderId: orderRef.id, providerKey: provider.key, providerOrderId: result.order, providerServiceId: local.providerServiceId, quantity: input.quantity });
     await orderRef.set({ providerOrderId: result.order, status: "pending", submittedAt: FieldValue.serverTimestamp(), updatedAt: FieldValue.serverTimestamp() }, { merge: true });
     await db.collection("orderEvents").add({ orderId: orderRef.id, userId: input.userId, status: "pending", createdAt: FieldValue.serverTimestamp() });

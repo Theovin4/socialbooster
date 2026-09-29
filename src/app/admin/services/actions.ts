@@ -9,7 +9,7 @@ import { isProviderKey } from "@/lib/providers";
 import { synchronizeProviderServices } from "@/lib/services-sync";
 
 const refresh = () => { revalidateTag("active-service-catalog", "max"); revalidatePath("/admin/services"); revalidatePath("/services"); };
-const validServiceId = (id: string) => /^(?:\d+|(?:nitro|smmworld)_\d+)$/.test(id);
+const validServiceId = (id: string) => /^(?:\d+|followspanel_[A-Za-z0-9][A-Za-z0-9_-]{2,127}|(?:nitro|smmworld)_\d+)$/.test(id);
 
 export async function syncAllServices(formData: FormData) {
   await requireAdmin();
