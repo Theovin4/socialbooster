@@ -15,13 +15,17 @@ function numericServiceId(...values: unknown[]) {
     return /^\d+$/.test(normalized) && Number(normalized) > 0;
   });
 }
+function fieldValue(row: Record<string, unknown>, ...aliases: string[]) {
+  const normalized = new Map(Object.entries(row).map(([key, value]) => [key.toLowerCase().replace(/[^a-z0-9]/g, ""), value]));
+  return aliases.map((alias) => normalized.get(alias)).find((value) => value != null && value !== "");
+}
 const serviceSchema = z.preprocess((value) => {
   if (!value || typeof value !== "object" || Array.isArray(value)) return value;
   const row = value as Record<string, unknown>;
   return {
     ...row,
-    service: numericServiceId(row.service, row.id, row.service_id, row.sid),
-    name: row.name ?? row.title ?? row.service_name ?? row.service_title,
+    service: numericServiceId(row.service, row.id, row.service_id, row.sid, fieldValue(row, "serviceid", "idservice", "servicecode", "sid", "id")),
+    name: row.name ?? row.title ?? row.service_name ?? row.service_title ?? (typeof row.service === "string" && !/^\s*\d+\s*$/.test(row.service) ? row.service : undefined),
     rate: row.rate ?? row.price ?? row.cost,
     min: row.min ?? row.minimum ?? row.min_order ?? row.minOrder,
     max: row.max ?? row.maximum ?? row.max_order ?? row.maxOrder,
@@ -106,7 +110,13 @@ export class FollowsPanelClient {
         const parsed = serviceSchema.safeParse(row);
         return parsed.success ? [] : parsed.error.issues.map((issue) => `${issue.path.join(".") || "row"}:${issue.code}`);
       }))).slice(0, 8).join(", ");
-      throw new ProviderError(`The service catalogue format is not supported${issueSummary ? ` (${issueSummary})` : ""}`, "INVALID_CATALOGUE");
+      const firstRow = rows[0];
+      const shape = Array.isArray(firstRow)
+        ? `tuple:${firstRow.length}`
+        : firstRow && typeof firstRow === "object"
+          ? `fields:${Object.keys(firstRow as Record<string, unknown>).sort().slice(0, 24).join("|")}`
+          : `row:${typeof firstRow}`;
+      throw new ProviderError(`The service catalogue format is not supported${issueSummary ? ` (${issueSummary})` : ""}; ${shape}`, "INVALID_CATALOGUE");
     }
     if (skipped) console.warn("[followspanel] skipped invalid catalogue rows", { skipped, received: rows.length });
     return valid;
