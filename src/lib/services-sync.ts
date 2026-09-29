@@ -4,6 +4,7 @@ import { adminDb } from "./firebase/admin";
 import { configuredUsdToNgnRateMicros, convertMinor } from "./currency";
 import { DEFAULT_MARGIN_BPS, decimalToMinor, sellingPriceMinor } from "./money";
 import { providerDefinitions, providerServiceDocumentId, type ProviderDefinition } from "./providers";
+import { evaluateServiceQuality } from "./service-quality";
 
 export async function synchronizeProviderServices(providerKey: ProviderDefinition["key"]) {
   const provider = providerDefinitions().find((item) => item.key === providerKey);
@@ -31,9 +32,11 @@ export async function synchronizeProviderServices(providerKey: ProviderDefinitio
   writer.onWriteError((error) => error.failedAttempts < 3);
   const markupBps = DEFAULT_MARGIN_BPS, usdToNgn = configuredUsdToNgnRateMicros();
   let changed = 0, repriced = 0;
+  const incomingIds = new Set<string>();
 
   for (const item of rows) {
     const id = providerServiceDocumentId(provider.key, item.service);
+    incomingIds.add(id);
     const nativeRateMinor = decimalToMinor(item.rate);
     const providerRateNgnMinor = providerCurrency === "USD" ? convertMinor(nativeRateMinor, usdToNgn) : nativeRateMinor;
     const sellingRateMinor = sellingPriceMinor(providerRateNgnMinor, markupBps);
@@ -43,15 +46,32 @@ export async function synchronizeProviderServices(providerKey: ProviderDefinitio
       writer.set(db.collection("providerServices").doc(id), { ...providerData, syncFingerprint, lastSyncedAt: FieldValue.serverTimestamp() }, { merge: true });
       changed += 1;
     }
-    const existing = services.get(id), pricingFingerprint = createHash("sha256").update(JSON.stringify({ ...providerData, providerRateNgnMinor: String(providerRateNgnMinor), markupBps: Number(markupBps) })).digest("hex");
+    const existing = services.get(id);
+    const quality = evaluateServiceQuality({ name: item.name, category: item.category, min: item.min, max: item.max, rateMinor: providerRateNgnMinor, providerFunded });
+    const visibilityOverride = existing?.visibilityOverride === "show" || existing?.visibilityOverride === "hide" ? existing.visibilityOverride : null;
+    const active = visibilityOverride === "show" ? providerFunded : visibilityOverride === "hide" ? false : quality.publicEligible;
+    const customerData = { ...providerData, categoryName: quality.normalizedCategory, publicEligibility: quality.publicEligible ? "eligible" : "hidden", hiddenReasons: quality.hiddenReasons };
+    const pricingFingerprint = createHash("sha256").update(JSON.stringify({ ...customerData, providerRateNgnMinor: String(providerRateNgnMinor), markupBps: Number(markupBps), active })).digest("hex");
     // Backup catalogues are safe to synchronize while unfunded, but their
     // services must not accept customer orders until the account has funds.
     // A later funded synchronization automatically re-enables them.
-    const active = providerFunded;
     if (existing?.pricingFingerprint === pricingFingerprint && existing?.pricingModel === "ngn_markup_v1" && existing?.active === active) continue;
     const grossMarginBps = sellingRateMinor > 0n ? Number((sellingRateMinor - providerRateNgnMinor) * 10000n / sellingRateMinor) : 0;
-    writer.set(db.collection("services").doc(id), { ...providerData, providerNativeRateMinor: Number(nativeRateMinor), providerRateMinor: Number(providerRateNgnMinor), providerRateNgnMinor: Number(providerRateNgnMinor), sellingCurrency: "NGN", sellingRateMinor: Number(sellingRateMinor), pricingModel: "ngn_markup_v1", pricingFingerprint, markupBps: Number(markupBps), grossMarginBps, active, autoImported: true, customSellingRateMinor: FieldValue.delete(), marginBps: FieldValue.delete(), updatedAt: FieldValue.serverTimestamp(), ...(existing ? {} : { createdAt: FieldValue.serverTimestamp() }) }, { merge: true });
+    writer.set(db.collection("services").doc(id), { ...customerData, providerNativeRateMinor: Number(nativeRateMinor), providerRateMinor: Number(providerRateNgnMinor), providerRateNgnMinor: Number(providerRateNgnMinor), sellingCurrency: "NGN", sellingRateMinor: Number(sellingRateMinor), pricingModel: "ngn_markup_v1", pricingFingerprint, markupBps: Number(markupBps), grossMarginBps, active, autoImported: true, customSellingRateMinor: FieldValue.delete(), marginBps: FieldValue.delete(), updatedAt: FieldValue.serverTimestamp(), ...(existing ? {} : { createdAt: FieldValue.serverTimestamp() }) }, { merge: true });
     changed += 1; repriced += 1;
+  }
+
+  // Anything removed from a provider catalogue must stop accepting new orders.
+  // The document remains available for historical orders and administrative audit.
+  for (const [id, existing] of services) {
+    if (incomingIds.has(id) || existing.active === false) continue;
+    writer.set(customerCatalogue.doc(id), { active: false, publicEligibility: "hidden", hiddenReasons: ["removed_from_provider_catalog"], updatedAt: FieldValue.serverTimestamp() }, { merge: true });
+    changed += 1;
+  }
+  for (const [id, existing] of providers) {
+    if (incomingIds.has(id) || existing.isActive === false) continue;
+    writer.set(providerCatalogue.doc(id), { isActive: false, lastSyncedAt: FieldValue.serverTimestamp() }, { merge: true });
+    changed += 1;
   }
   await writer.close();
   const result = { provider: provider.key, providerCurrency, providerBalance: balance.balance, providerFunded, serviceCount: rows.length, changedCount: changed, repricedCount: repriced, durationMs: Date.now() - startedAt };
