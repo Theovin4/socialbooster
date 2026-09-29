@@ -19,6 +19,11 @@ function fieldValue(row: Record<string, unknown>, ...aliases: string[]) {
   const normalized = new Map(Object.entries(row).map(([key, value]) => [key.toLowerCase().replace(/[^a-z0-9]/g, ""), value]));
   return aliases.map((alias) => normalized.get(alias)).find((value) => value != null && value !== "");
 }
+function safeValueSignature(value: unknown) {
+  const text = String(value ?? "").trim();
+  const pattern = text.replace(/[A-Za-z]/g, "A").replace(/\d/g, "#").slice(0, 32);
+  return `${typeof value}:${text.length}:${pattern}`;
+}
 const serviceSchema = z.preprocess((value) => {
   if (!value || typeof value !== "object" || Array.isArray(value)) return value;
   const row = value as Record<string, unknown>;
@@ -114,7 +119,7 @@ export class FollowsPanelClient {
       const shape = Array.isArray(firstRow)
         ? `tuple:${firstRow.length}`
         : firstRow && typeof firstRow === "object"
-          ? `fields:${Object.keys(firstRow as Record<string, unknown>).sort().slice(0, 24).join("|")}`
+          ? `fields:${Object.keys(firstRow as Record<string, unknown>).sort().slice(0, 24).join("|")}; service-signature:${safeValueSignature((firstRow as Record<string, unknown>).service)}`
           : `row:${typeof firstRow}`;
       throw new ProviderError(`The service catalogue format is not supported${issueSummary ? ` (${issueSummary})` : ""}; ${shape}`, "INVALID_CATALOGUE");
     }
