@@ -10,7 +10,8 @@ import { formatMoney } from "@/lib/money";
 
 export const dynamic = "force-dynamic";
 type Service = { name: string; description?: string; categoryName: string; type: string; minQuantity: number; maxQuantity: number; refillSupported: boolean; cancelSupported: boolean; sellingRateMinor: number; sellingCurrency?: string; active: boolean };
-const getService = cache(async (id: string) => { if (!/^\d+$/.test(id)) return null; const snapshot = await adminDb().collection("services").doc(id).get(); if (!snapshot.exists || snapshot.data()?.active !== true) return null; return snapshot.data() as Service; });
+const serviceDocumentId = /^(?:\d+|followspanel_[A-Za-z0-9][A-Za-z0-9_-]{2,127}|(?:nitro|smmworld)_\d+)$/;
+const getService = cache(async (id: string) => { if (!serviceDocumentId.test(id)) return null; const snapshot = await adminDb().collection("services").doc(id).get(); if (!snapshot.exists || snapshot.data()?.active !== true) return null; return snapshot.data() as Service; });
 
 export async function generateMetadata({ params }: { params: Promise<{ id: string }> }): Promise<Metadata> {
   const { id } = await params;
