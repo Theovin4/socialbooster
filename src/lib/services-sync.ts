@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import { FieldValue } from "firebase-admin/firestore";
+import { FieldPath, FieldValue } from "firebase-admin/firestore";
 import { adminDb } from "./firebase/admin";
 import { configuredUsdToNgnRateMicros, convertMinor } from "./currency";
 import { DEFAULT_MARGIN_BPS, decimalToMinor, sellingPriceMinor } from "./money";
@@ -22,12 +22,17 @@ export async function synchronizeProviderServices(providerKey: ProviderDefinitio
   const customerCatalogue = db.collection("services");
   const providerQuery = providerCatalogue.where("providerKey", "==", provider.key);
   const serviceQuery = customerCatalogue.where("providerKey", "==", provider.key);
-  const [providerSnapshot, serviceSnapshot] = await Promise.all([
+  const syncStateRef = db.collection("providerSyncState").doc(provider.key);
+  const syncState = await syncStateRef.get();
+  const migrateLegacyNumericServices = provider.key === "followspanel" && syncState.get("legacyNumericMigrationVersion") !== 1;
+  const [providerSnapshot, serviceSnapshot, legacyProviderSnapshot, legacyServiceSnapshot] = await Promise.all([
     providerQuery.get(),
     serviceQuery.get(),
+    migrateLegacyNumericServices ? providerCatalogue.where(FieldPath.documentId(), ">=", "0").where(FieldPath.documentId(), "<=", `9\uf8ff`).get() : null,
+    migrateLegacyNumericServices ? customerCatalogue.where(FieldPath.documentId(), ">=", "0").where(FieldPath.documentId(), "<=", `9\uf8ff`).get() : null,
   ]);
-  const providers = new Map(providerSnapshot.docs.map((doc) => [doc.id, doc.data()]));
-  const services = new Map(serviceSnapshot.docs.map((doc) => [doc.id, doc.data()]));
+  const providers = new Map([...providerSnapshot.docs, ...(legacyProviderSnapshot?.docs || [])].map((doc) => [doc.id, doc.data()]));
+  const services = new Map([...serviceSnapshot.docs, ...(legacyServiceSnapshot?.docs || [])].map((doc) => [doc.id, doc.data()]));
   const writer = db.bulkWriter();
   writer.onWriteError((error) => error.failedAttempts < 3);
   const markupBps = DEFAULT_MARGIN_BPS, usdToNgn = configuredUsdToNgnRateMicros();
@@ -75,7 +80,7 @@ export async function synchronizeProviderServices(providerKey: ProviderDefinitio
   }
   await writer.close();
   const result = { provider: provider.key, providerCurrency, providerBalance: balance.balance, providerFunded, serviceCount: rows.length, changedCount: changed, repricedCount: repriced, durationMs: Date.now() - startedAt };
-  await db.collection("providerSyncState").doc(provider.key).set({ ...result, status: "completed", completedAt: FieldValue.serverTimestamp() }, { merge: true });
+  await syncStateRef.set({ ...result, status: "completed", ...(migrateLegacyNumericServices ? { legacyNumericMigrationVersion: 1 } : {}), completedAt: FieldValue.serverTimestamp() }, { merge: true });
   console.info("[services:sync] completed", result);
   return result;
 }
