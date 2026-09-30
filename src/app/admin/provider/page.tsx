@@ -4,21 +4,53 @@ import { adminDb } from "@/lib/firebase/admin";
 import { requireAdmin } from "@/lib/firebase/session";
 import { normalizeProviderKey, providerDefinitions } from "@/lib/providers";
 import { formatMoney } from "@/lib/money";
-import { FieldPath } from "firebase-admin/firestore";
+import { FieldPath, Timestamp } from "firebase-admin/firestore";
 import { refreshLiveOrders, refundOrder, retryCancellation } from "./actions";
 
 export const dynamic = "force-dynamic";
 const PAGE_SIZE = 50;
 type LiveStatus = { status: string; start_count?: string; remains?: string };
+type PageCursor = { createdAt: number; id: string };
 
-export default async function ProviderHealthPage({ searchParams }: { searchParams: Promise<{ page?: string }> }) {
+function encodeCursor(cursor: PageCursor) {
+  return Buffer.from(JSON.stringify(cursor)).toString("base64url");
+}
+
+function decodeCursor(value?: string): PageCursor | null {
+  if (!value) return null;
+  try {
+    const parsed = JSON.parse(Buffer.from(value, "base64url").toString("utf8")) as Partial<PageCursor>;
+    return Number.isFinite(parsed.createdAt) && typeof parsed.id === "string" && parsed.id.length > 0
+      ? { createdAt: Number(parsed.createdAt), id: parsed.id }
+      : null;
+  } catch {
+    return null;
+  }
+}
+
+function cursorFor(document: FirebaseFirestore.QueryDocumentSnapshot) {
+  const createdAt = document.get("createdAt")?.toMillis?.();
+  return Number.isFinite(createdAt) ? encodeCursor({ createdAt, id: document.id }) : null;
+}
+
+export default async function ProviderHealthPage({ searchParams }: { searchParams: Promise<{ after?: string; before?: string }> }) {
   await requireAdmin();
-  const input = await searchParams, page = Math.max(1, Number.parseInt(input.page || "1", 10) || 1), db = adminDb();
+  const input = await searchParams, after = decodeCursor(input.after), before = decodeCursor(input.before), db = adminDb();
+  let ordersQuery = db.collection("orders").orderBy("createdAt", "desc").orderBy(FieldPath.documentId(), "desc");
+  if (after) ordersQuery = ordersQuery.startAfter(Timestamp.fromMillis(after.createdAt), after.id);
+  if (before) ordersQuery = ordersQuery.endBefore(Timestamp.fromMillis(before.createdAt), before.id);
+  const pagedOrdersQuery = before ? ordersQuery.limitToLast(PAGE_SIZE + 1) : ordersQuery.limit(PAGE_SIZE + 1);
   const [orderSnapshot, countSnapshot] = await Promise.all([
-    db.collection("orders").orderBy("createdAt", "desc").offset((page - 1) * PAGE_SIZE).limit(PAGE_SIZE + 1).get(),
+    pagedOrdersQuery.get(),
     db.collection("orders").count().get(),
   ]);
-  const hasNext = orderSnapshot.size > PAGE_SIZE, orders = orderSnapshot.docs.slice(0, PAGE_SIZE), total = countSnapshot.data().count;
+  const hasExtra = orderSnapshot.size > PAGE_SIZE;
+  const orders = before && hasExtra ? orderSnapshot.docs.slice(1) : orderSnapshot.docs.slice(0, PAGE_SIZE);
+  const hasPrevious = Boolean(after || before) && (before ? hasExtra : true);
+  const hasNext = before ? true : hasExtra;
+  const previousCursor = orders[0] ? cursorFor(orders[0]) : null;
+  const nextCursor = orders.at(-1) ? cursorFor(orders.at(-1)!) : null;
+  const total = countSnapshot.data().count;
   const providers = providerDefinitions();
   const health = await Promise.all(providers.map(async (provider) => {
     if (!provider.configured) return { ...provider, connected: false as const, balance: null, serviceCount: 0 };
@@ -53,6 +85,6 @@ export default async function ProviderHealthPage({ searchParams }: { searchParam
       const providerKey = normalizeProviderKey(item.get("providerKey")), provider = providers.find((entry) => entry.key === providerKey)!, providerId = item.get("providerOrderId"), live = providerId ? liveByProvider.get(providerKey)?.[String(providerId)] : undefined, refunded = item.get("status") === "refunded", createdAt = item.get("createdAt")?.toDate?.(), lastUpdate = item.get("lastProviderUpdate")?.toDate?.();
       return <tr key={item.id}><td>#{item.id.slice(0, 8)}</td><td>{createdAt ? createdAt.toLocaleString("en-NG") : "—"}</td><td>{item.get("providerLabel") || provider.label}</td><td>{providerId || "Not submitted"}</td><td>{item.get("serviceName")}</td><td>{Number(item.get("quantity") || 0).toLocaleString("en-NG")}</td><td>{formatMoney(BigInt(item.get("customerPriceMinor") || 0), item.get("currency") || "NGN")}</td><td><span className="status-pill">{String(item.get("status") || "unknown").replaceAll("_", " ")}</span></td><td>{live?.status || item.get("providerStatus") || (providerId ? "Unavailable" : "—")}</td><td>{live?.start_count ?? item.get("startCount") ?? "—"}</td><td>{live?.remains ?? item.get("remains") ?? "—"}</td><td>{item.get("cancellationStatus") ? <><span className="status-pill">{String(item.get("cancellationStatus")).replaceAll("_", " ")}</span>{item.get("cancellationStatus") === "provider_confirmation_required" ? <form action={retryCancellation} style={{ marginTop: 8 }}><input type="hidden" name="orderId" value={item.id} /><button className="btn" type="submit">Retry</button></form> : null}</> : "—"}</td><td>{lastUpdate ? lastUpdate.toLocaleString("en-NG") : "—"}</td><td>{refunded ? <span className="status-pill">Refunded</span> : <form action={refundOrder}><input type="hidden" name="orderId" value={item.id} /><button className="btn" type="submit">Refund</button></form>}</td></tr>;
     })}</tbody></table>{orders.length === 0 ? <div className="card"><p className="muted">No customer orders have been created yet.</p></div> : null}</section>
-    <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 12, marginTop: 18 }}><span className="muted">Page {page} · showing {orders.length} of {total.toLocaleString("en-NG")}</span><div style={{ display: "flex", gap: 10 }}>{page > 1 ? <Link className="btn" href={`/admin/provider?page=${page - 1}`}>Previous</Link> : null}{hasNext ? <Link className="btn" href={`/admin/provider?page=${page + 1}`}>Next</Link> : null}</div></div>
+    <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 12, marginTop: 18 }}><span className="muted">Showing {orders.length} of {total.toLocaleString("en-NG")} orders</span><div style={{ display: "flex", gap: 10 }}>{hasPrevious && previousCursor ? <Link className="btn" href={`/admin/provider?before=${encodeURIComponent(previousCursor)}`}>Previous</Link> : null}{hasNext && nextCursor ? <Link className="btn" href={`/admin/provider?after=${encodeURIComponent(nextCursor)}`}>Next</Link> : null}</div></div>
   </AppShell>;
 }

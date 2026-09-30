@@ -84,13 +84,15 @@ export async function getActiveServiceCatalog(): Promise<CachedService[]> {
  * Sends only one bounded page to the browser. The shared catalogue remains
  * cached on the server, so search and pagination do not add Firestore reads.
  */
-export async function getServiceCatalogPage(input: {
+type ServiceCatalogPageInput = {
   query?: string;
   category?: string;
   page?: number;
   pageSize?: number;
   selectedId?: string;
-} = {}): Promise<ServiceCatalogPage> {
+};
+
+async function buildServiceCatalogPage(input: ServiceCatalogPageInput): Promise<ServiceCatalogPage> {
   const catalog = await getActiveServiceCatalog();
   const categories = Array.from(new Set(catalog.map((item) => item.category))).sort((a, b) => a.localeCompare(b));
   const query = (input.query || "").trim().toLocaleLowerCase("en");
@@ -107,4 +109,28 @@ export async function getServiceCatalogPage(input: {
   const page = Math.max(1, Math.min(totalPages, requestedPage));
   const start = (page - 1) * pageSize;
   return { items: filtered.slice(start, start + pageSize), categories, page, pageSize, total, totalPages };
+}
+
+const getCachedServiceCatalogPage = unstable_cache(
+  async (query: string, category: string, page: number, pageSize: number, selectedId: string) =>
+    buildServiceCatalogPage({ query, category, page, pageSize, selectedId }),
+  ["active-service-catalog-v4-page"],
+  { revalidate: 86_400, tags: [SERVICE_CATALOG_TAG] },
+);
+
+/**
+ * Search, category filtering and pagination are resolved on the server. Each
+ * small result page is cached independently, so repeated customer requests do
+ * not rebuild or resend the full catalogue.
+ */
+export async function getServiceCatalogPage(input: ServiceCatalogPageInput = {}): Promise<ServiceCatalogPage> {
+  const page = input.page ? Math.max(1, Math.floor(input.page)) : 0;
+  const pageSize = Math.max(10, Math.min(100, Math.floor(input.pageSize || 50)));
+  return getCachedServiceCatalogPage(
+    (input.query || "").trim(),
+    (input.category || "").trim(),
+    page,
+    pageSize,
+    (input.selectedId || "").trim(),
+  );
 }
