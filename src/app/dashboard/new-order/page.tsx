@@ -1,7 +1,7 @@
 import Link from "next/link";
 import { AppShell } from "@/components/app-shell";
 import { NewOrderForm, type OrderService } from "@/components/new-order-form";
-import { getServiceCatalogPage } from "@/lib/service-catalog";
+import { getServiceCatalogPage, resolveServiceIdentifier } from "@/lib/service-catalog";
 import { submitOrder } from "../orders/actions";
 
 export const dynamic = "force-dynamic";
@@ -9,9 +9,11 @@ export const dynamic = "force-dynamic";
 export default async function NewOrderPage({ searchParams }: { searchParams: Promise<{ service?: string; q?: string; category?: string; page?: string }> }) {
   const input = await searchParams;
   const requestedPage = Math.max(1, Number.parseInt(input.page || "1", 10) || 1);
-  const catalog = await getServiceCatalogPage({ query: input.q, category: input.category, page: input.page ? requestedPage : undefined, pageSize: 50, selectedId: input.service });
+  const selectedService = input.service ? await resolveServiceIdentifier(input.service) : null;
+  const requestedServiceId = selectedService?.id || input.service;
+  const catalog = await getServiceCatalogPage({ query: input.q, category: input.category, page: input.page ? requestedPage : undefined, pageSize: 50, selectedId: requestedServiceId });
   const services: OrderService[] = catalog.items.map((item) => ({ id: item.id, name: item.name, category: item.category, min: item.min, max: item.max, rateMinor: item.rateMinor, refill: item.refill, cancel: item.cancel, description: item.description }));
-  const selectedId = services.some((item) => item.id === input.service) ? input.service : undefined;
+  const selectedId = services.some((item) => item.id === requestedServiceId) ? requestedServiceId : undefined;
   const pageHref = (page: number) => {
     const params = new URLSearchParams();
     if (input.q?.trim()) params.set("q", input.q.trim());

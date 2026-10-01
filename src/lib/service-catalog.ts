@@ -1,12 +1,17 @@
+import "server-only";
 import { unstable_cache } from "next/cache";
 import { FieldPath } from "firebase-admin/firestore";
 import { serviceSellingRateNgnMinor } from "./currency";
 import { adminDb } from "./firebase/admin";
+import { publicServiceId } from "./service-public-id";
+
+export { publicServiceId } from "./service-public-id";
 
 export const SERVICE_CATALOG_TAG = "active-service-catalog";
 
 export type CachedService = {
   id: string;
+  internalId: string;
   name: string;
   category: string;
   type: string;
@@ -44,7 +49,8 @@ function getCatalogChunk(afterId: string) {
     const items = snapshot.docs.map((doc) => {
     const item = doc.data();
     return {
-      id: doc.id,
+      id: publicServiceId(doc.id),
+      internalId: doc.id,
       name: String(item.name || "Service"),
       category: String(item.categoryName || "Other"),
       type: String(item.type || "default"),
@@ -61,7 +67,7 @@ function getCatalogChunk(afterId: string) {
     };
     });
     return { items, lastId: snapshot.docs.at(-1)?.id || null, hasMore: snapshot.size === CATALOG_CHUNK_SIZE };
-  }, ["active-service-catalog-v3-chunk", afterId || "start"], { revalidate: 86_400, tags: [SERVICE_CATALOG_TAG] })();
+  }, ["active-service-catalog-v5-chunk", afterId || "start"], { revalidate: 86_400, tags: [SERVICE_CATALOG_TAG] })();
 }
 
 /**
@@ -114,7 +120,7 @@ async function buildServiceCatalogPage(input: ServiceCatalogPageInput): Promise<
 const getCachedServiceCatalogPage = unstable_cache(
   async (query: string, category: string, page: number, pageSize: number, selectedId: string) =>
     buildServiceCatalogPage({ query, category, page, pageSize, selectedId }),
-  ["active-service-catalog-v4-page"],
+  ["active-service-catalog-v6-page"],
   { revalidate: 86_400, tags: [SERVICE_CATALOG_TAG] },
 );
 
@@ -133,4 +139,16 @@ export async function getServiceCatalogPage(input: ServiceCatalogPageInput = {})
     pageSize,
     (input.selectedId || "").trim(),
   );
+}
+
+/**
+ * Converts a public Social Booster service code to its private Firestore ID.
+ * Legacy internal IDs remain accepted server-side so existing API integrations
+ * and saved links continue to work, but they are never returned to customers.
+ */
+export async function resolveServiceIdentifier(identifier: string): Promise<CachedService | null> {
+  const normalized = identifier.trim();
+  if (!normalized || normalized.length > 160) return null;
+  const catalog = await getActiveServiceCatalog();
+  return catalog.find((service) => service.id === normalized || service.internalId === normalized) || null;
 }

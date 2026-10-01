@@ -4,10 +4,10 @@ import { authenticateCustomerApi, CustomerApiError, hashCustomerApiKey } from "@
 import { adminDb } from "@/lib/firebase/admin";
 import { createAndSubmitOrder } from "@/lib/orders";
 import { customerOrderStatusLabel } from "@/lib/customer-order-status";
-import { getActiveServiceCatalog } from "@/lib/service-catalog";
+import { getActiveServiceCatalog, resolveServiceIdentifier } from "@/lib/service-catalog";
 
 export const dynamic = "force-dynamic";
-const addSchema = z.object({ service: z.coerce.string().regex(/^(?:\d+|followspanel_[A-Za-z0-9][A-Za-z0-9_-]{2,127}|(?:nitro|smmworld)_\d+)$/), link: z.string().url().max(2048), quantity: z.coerce.number().int().positive(), idempotency_key: z.string().regex(/^[A-Za-z0-9_-]{8,80}$/).optional() });
+const addSchema = z.object({ service: z.coerce.string().min(3).max(160), link: z.string().url().max(2048), quantity: z.coerce.number().int().positive(), idempotency_key: z.string().regex(/^[A-Za-z0-9_-]{8,80}$/).optional() });
 
 async function input(request: Request) {
   const contentType = request.headers.get("content-type") || "";
@@ -31,8 +31,10 @@ export async function POST(request: Request) {
     }
     if (action === "add") {
       const parsed = addSchema.parse(body);
+      const service = await resolveServiceIdentifier(parsed.service);
+      if (!service) throw new CustomerApiError("Service not found", 404, "service_not_found");
       const idempotencyKey = parsed.idempotency_key ? `api-${hashCustomerApiKey(`${auth.userId}:${parsed.idempotency_key}`).slice(0, 32)}` : randomUUID();
-      const result = await createAndSubmitOrder({ userId: auth.userId, serviceId: parsed.service, link: parsed.link, quantity: parsed.quantity, idempotencyKey });
+      const result = await createAndSubmitOrder({ userId: auth.userId, serviceId: service.internalId, link: parsed.link, quantity: parsed.quantity, idempotencyKey });
       return Response.json({ order: result.id, status: result.status });
     }
     if (action === "status") {

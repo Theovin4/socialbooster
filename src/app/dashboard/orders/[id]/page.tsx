@@ -9,6 +9,7 @@ import { synchronizeOrderDocuments } from "@/lib/order-sync";
 import { customerOrderStatusLabel } from "@/lib/customer-order-status";
 import { requestCancellation, requestRefill } from "../request-actions";
 import { AnalyticsEvent } from "@/components/analytics-event";
+import { publicServiceId } from "@/lib/service-public-id";
 
 export const dynamic = "force-dynamic";
 const active = new Set([
@@ -84,7 +85,7 @@ export default async function OrderPage({
     });
   return (
     <AppShell>
-      {notice === "order-created" ? <AnalyticsEvent event="order_success" parameters={{ service_id: String(order.serviceId || "unknown") }} /> : null}
+      {notice === "order-created" ? <AnalyticsEvent event="order_success" parameters={{ service_id: order.serviceId ? publicServiceId(String(order.serviceId)) : "unknown" }} /> : null}
       {notice === "order-created" ? (
         <Toast
           kind="success"
