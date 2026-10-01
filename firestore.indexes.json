@@ -33,6 +33,22 @@
       ]
     },
     {
+      "collectionGroup": "walletTransactions",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "type", "order": "ASCENDING" },
+        { "fieldPath": "deltaMinor", "order": "ASCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "wallets",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "currency", "order": "ASCENDING" },
+        { "fieldPath": "availableMinor", "order": "ASCENDING" }
+      ]
+    },
+    {
       "collectionGroup": "paymentIntents",
       "queryScope": "COLLECTION",
       "fields": [

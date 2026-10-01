@@ -2,7 +2,7 @@ import { randomUUID } from "node:crypto";
 import { FieldValue } from "firebase-admin/firestore";
 import { adminDb } from "./firebase/admin";
 import { postWallet } from "./firebase/wallet";
-import { serviceCostMinor } from "./money";
+import { DEFAULT_GROSS_MARGIN_BPS, grossMarginBps, markupBps, serviceCostMinor } from "./money";
 import { serviceSellingRateNgnMinor } from "./currency";
 import { ProviderError } from "./providers/followspanel";
 import { getProvider, normalizeProviderKey } from "./providers";
@@ -34,7 +34,7 @@ export async function createAndSubmitOrder(input: NewOrder) {
     transaction.create(db.collection("walletLedger").doc(walletTransactionId), { walletUserId: input.userId, transactionId: walletTransactionId, type: "order_debit", deltaMinor: -customerPriceMinor, currency, balanceBeforeMinor: available, balanceAfterMinor: next, reference: orderRef.id, createdAt: FieldValue.serverTimestamp() });
     const grossProfitMinor = customerPriceMinor - convertedProviderCostMinor;
     const providerKey = normalizeProviderKey(data.providerKey);
-    const order = { userId: input.userId, serviceId: input.serviceId, serviceName: data.name, providerKey, providerLabel: data.providerLabel || getProvider(providerKey).label, providerServiceId: data.providerServiceId, link: input.link, quantity: input.quantity, currency, sellingRateMinor: Number(sellingRateMinor), providerCurrency: data.providerCurrency || "NGN", providerRateMinor: data.providerRateMinor, providerCostMinor, convertedProviderCostMinor, customerPriceMinor, grossProfitMinor, markupBps: data.markupBps ?? 4000, grossMarginBps: Math.floor(grossProfitMinor * 10000 / customerPriceMinor), pricingModel: "ngn_markup_v1", refillSupported: data.refillSupported, cancelSupported: data.cancelSupported, status: "submitting", idempotencyKey: input.idempotencyKey, createdAt: FieldValue.serverTimestamp(), updatedAt: FieldValue.serverTimestamp() };
+    const order = { userId: input.userId, serviceId: input.serviceId, serviceName: data.name, providerKey, providerLabel: data.providerLabel || getProvider(providerKey).label, providerServiceId: data.providerServiceId, link: input.link, quantity: input.quantity, currency, sellingRateMinor: Number(sellingRateMinor), providerCurrency: data.providerCurrency || "NGN", providerRateMinor: data.providerRateMinor, providerCostMinor, convertedProviderCostMinor, customerPriceMinor, grossProfitMinor, grossMarginTargetBps: Number(DEFAULT_GROSS_MARGIN_BPS), markupBps: Number(markupBps(BigInt(convertedProviderCostMinor), BigInt(customerPriceMinor))), grossMarginBps: Number(grossMarginBps(BigInt(convertedProviderCostMinor), BigInt(customerPriceMinor))), pricingModel: "ngn_gross_margin_v2", refillSupported: data.refillSupported, cancelSupported: data.cancelSupported, status: "submitting", idempotencyKey: input.idempotencyKey, createdAt: FieldValue.serverTimestamp(), updatedAt: FieldValue.serverTimestamp() };
     transaction.create(orderRef, order); transaction.create(db.collection("orderEvents").doc(), { orderId: orderRef.id, userId: input.userId, status: "submitting", createdAt: FieldValue.serverTimestamp() });
     recordNewOrder(transaction);
     return order;

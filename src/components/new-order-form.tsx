@@ -1,10 +1,11 @@
 "use client";
 
-import { useActionState, useState } from "react";
+import { useActionState, useEffect, useState } from "react";
 import { Calculator, CheckCircle2, Info, Link2 } from "lucide-react";
 import { formatMoney } from "@/lib/money";
 import { Toast } from "./toast";
 import type { OrderActionState } from "@/app/dashboard/orders/actions";
+import { trackAnalyticsEvent } from "@/lib/analytics";
 
 export type OrderService = { id: string; name: string; category: string; description: string; min: number; max: number; rateMinor: number; refill: boolean; cancel: boolean };
 
@@ -23,11 +24,12 @@ export function NewOrderForm({ services, selectedId, action }: { services: Order
   const numericQuantity = Number(quantity || 0);
   const charge = service && Number.isFinite(numericQuantity) ? Math.ceil(service.rateMinor * numericQuantity / 1000) : 0;
   const validQuantity = !!service && Number.isInteger(numericQuantity) && numericQuantity >= service.min && numericQuantity <= service.max;
+  useEffect(() => { if (state.status === "error") trackAnalyticsEvent("order_failure", { reason: "validation_or_submission" }); }, [state.status]);
 
-  return <div className="glass card order-form-card">{state.status === "error" && state.message ? <Toast key={state.message} kind="error" title="Order not submitted" message={state.message} /> : null}<form action={formAction} className="order-form">
+  return <div className="glass card order-form-card">{state.status === "error" && state.message ? <Toast key={state.message} kind="error" title="Order not submitted" message={state.message} /> : null}<form action={formAction} className="order-form" onSubmit={() => trackAnalyticsEvent("order_start", { service_id: serviceId })}>
     <div className="order-step"><span>1</span><div><strong>Choose a service</strong></div></div>
     <div className="form-grid">
-      <label className="form-span">Service<select className="field" name="serviceId" value={serviceId} onChange={(event) => { setServiceId(event.target.value); setQuantity(""); }} required><option value="">Choose from this page ({services.length.toLocaleString("en-NG")} available)</option>{services.map((item) => <option value={item.id} key={item.id}>{item.category} · {item.name} — {formatMoney(BigInt(item.rateMinor), "NGN")}/1,000</option>)}</select></label>
+      <label className="form-span">Service<select className="field" name="serviceId" value={serviceId} onChange={(event) => { setServiceId(event.target.value); setQuantity(""); if (event.target.value) trackAnalyticsEvent("service_view", { service_id: event.target.value, surface: "new_order" }); }} required><option value="">Choose from this page ({services.length.toLocaleString("en-NG")} available)</option>{services.map((item) => <option value={item.id} key={item.id}>{item.category} · {item.name} — {formatMoney(BigInt(item.rateMinor), "NGN")}/1,000</option>)}</select></label>
     </div>
     {service ? <section className="service-description" aria-live="polite"><div className="service-description-title"><Info size={20} /><div><span className="eyebrow">Service description</span><h2>{service.name}</h2></div></div><p>{serviceDescription(service)}</p><dl><div><dt>Rate</dt><dd>{formatMoney(BigInt(service.rateMinor), "NGN")} / 1,000</dd></div><div><dt>Minimum</dt><dd>{service.min.toLocaleString("en-NG")}</dd></div><div><dt>Maximum</dt><dd>{service.max.toLocaleString("en-NG")}</dd></div><div><dt>Refill</dt><dd>{service.refill ? "Available" : "Not included"}</dd></div></dl></section> : null}
     <div className="order-step"><span>2</span><div><strong>Order details</strong></div></div>

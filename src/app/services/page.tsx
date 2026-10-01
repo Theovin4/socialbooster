@@ -5,6 +5,7 @@ import { SiteHeader } from "@/components/site-header";
 import { isFirestoreQuotaError } from "@/lib/firebase/errors";
 import { formatMoney } from "@/lib/money";
 import { getServiceCatalogPage } from "@/lib/service-catalog";
+import { AnalyticsEvent } from "@/components/analytics-event";
 
 export const dynamic = "force-dynamic";
 type Service = { id: string; name: string; category: string; min: number; max: number; refill: boolean; rate: number };
@@ -48,7 +49,7 @@ export default async function Services({ searchParams }: { searchParams: Promise
     return `/services${query ? `?${query}` : ""}`;
   };
 
-  return <><SiteHeader /><main className="shell" style={{ minHeight: "68vh", padding: "78px 0" }}>
+  return <><SiteHeader /><main className="shell" style={{ minHeight: "68vh", padding: "78px 0" }}>{q.trim() ? <AnalyticsEvent event="service_search" parameters={{ result_count: total }} /> : null}
     <span className="eyebrow">Social media services in Nigeria</span>
     <h1 style={{ fontSize: "clamp(2.7rem,7vw,5rem)", letterSpacing: "-.055em", margin: "14px 0" }}>Find the right service for your goals.</h1>
     <p className="muted page-lead">Compare prices, limits and refill availability.</p>

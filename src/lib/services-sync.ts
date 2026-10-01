@@ -2,7 +2,7 @@ import { createHash } from "node:crypto";
 import { FieldPath, FieldValue } from "firebase-admin/firestore";
 import { adminDb } from "./firebase/admin";
 import { configuredUsdToNgnRateMicros, convertMinor } from "./currency";
-import { DEFAULT_MARGIN_BPS, decimalToMinor, sellingPriceMinor } from "./money";
+import { DEFAULT_GROSS_MARGIN_BPS, decimalToMinor, grossMarginBps, markupBps, sellingPriceForGrossMarginMinor } from "./money";
 import { providerDefinitions, providerServiceDocumentId, type ProviderDefinition } from "./providers";
 import { evaluateServiceQuality } from "./service-quality";
 
@@ -35,7 +35,7 @@ export async function synchronizeProviderServices(providerKey: ProviderDefinitio
   const services = new Map([...serviceSnapshot.docs, ...(legacyServiceSnapshot?.docs || [])].map((doc) => [doc.id, doc.data()]));
   const writer = db.bulkWriter();
   writer.onWriteError((error) => error.failedAttempts < 3);
-  const markupBps = DEFAULT_MARGIN_BPS, usdToNgn = configuredUsdToNgnRateMicros();
+  const grossMarginTargetBps = DEFAULT_GROSS_MARGIN_BPS, usdToNgn = configuredUsdToNgnRateMicros();
   let changed = 0, repriced = 0;
   const incomingIds = new Set<string>();
 
@@ -44,7 +44,7 @@ export async function synchronizeProviderServices(providerKey: ProviderDefinitio
     incomingIds.add(id);
     const nativeRateMinor = decimalToMinor(item.rate);
     const providerRateNgnMinor = providerCurrency === "USD" ? convertMinor(nativeRateMinor, usdToNgn) : nativeRateMinor;
-    const sellingRateMinor = sellingPriceMinor(providerRateNgnMinor, markupBps);
+    const sellingRateMinor = sellingPriceForGrossMarginMinor(providerRateNgnMinor, grossMarginTargetBps);
     const providerData = { providerKey: provider.key, providerLabel: provider.label, providerServiceId: item.service, name: item.name, description: "description" in item ? item.description || "" : "", categoryName: item.category, type: item.type, rateText: item.rate, providerNativeRateMinor: Number(nativeRateMinor), providerRateNgnMinor: Number(providerRateNgnMinor), minQuantity: item.min, maxQuantity: item.max, refillSupported: item.refill, cancelSupported: item.cancel, isActive: true, providerCurrency };
     const syncFingerprint = createHash("sha256").update(JSON.stringify(providerData)).digest("hex");
     if (providers.get(id)?.syncFingerprint !== syncFingerprint) {
@@ -56,13 +56,12 @@ export async function synchronizeProviderServices(providerKey: ProviderDefinitio
     const visibilityOverride = existing?.visibilityOverride === "show" || existing?.visibilityOverride === "hide" ? existing.visibilityOverride : null;
     const active = visibilityOverride === "show" ? providerFunded : visibilityOverride === "hide" ? false : quality.publicEligible;
     const customerData = { ...providerData, categoryName: quality.normalizedCategory, publicEligibility: quality.publicEligible ? "eligible" : "hidden", hiddenReasons: quality.hiddenReasons };
-    const pricingFingerprint = createHash("sha256").update(JSON.stringify({ ...customerData, providerRateNgnMinor: String(providerRateNgnMinor), markupBps: Number(markupBps), active })).digest("hex");
+    const pricingFingerprint = createHash("sha256").update(JSON.stringify({ ...customerData, providerRateNgnMinor: String(providerRateNgnMinor), grossMarginTargetBps: Number(grossMarginTargetBps), active })).digest("hex");
     // Backup catalogues are safe to synchronize while unfunded, but their
     // services must not accept customer orders until the account has funds.
     // A later funded synchronization automatically re-enables them.
-    if (existing?.pricingFingerprint === pricingFingerprint && existing?.pricingModel === "ngn_markup_v1" && existing?.active === active) continue;
-    const grossMarginBps = sellingRateMinor > 0n ? Number((sellingRateMinor - providerRateNgnMinor) * 10000n / sellingRateMinor) : 0;
-    writer.set(db.collection("services").doc(id), { ...customerData, providerNativeRateMinor: Number(nativeRateMinor), providerRateMinor: Number(providerRateNgnMinor), providerRateNgnMinor: Number(providerRateNgnMinor), sellingCurrency: "NGN", sellingRateMinor: Number(sellingRateMinor), pricingModel: "ngn_markup_v1", pricingFingerprint, markupBps: Number(markupBps), grossMarginBps, active, autoImported: true, customSellingRateMinor: FieldValue.delete(), marginBps: FieldValue.delete(), updatedAt: FieldValue.serverTimestamp(), ...(existing ? {} : { createdAt: FieldValue.serverTimestamp() }) }, { merge: true });
+    if (existing?.pricingFingerprint === pricingFingerprint && existing?.pricingModel === "ngn_gross_margin_v2" && existing?.active === active) continue;
+    writer.set(db.collection("services").doc(id), { ...customerData, providerNativeRateMinor: Number(nativeRateMinor), providerRateMinor: Number(providerRateNgnMinor), providerRateNgnMinor: Number(providerRateNgnMinor), sellingCurrency: "NGN", sellingRateMinor: Number(sellingRateMinor), pricingModel: "ngn_gross_margin_v2", pricingFingerprint, grossMarginTargetBps: Number(grossMarginTargetBps), grossMarginBps: Number(grossMarginBps(providerRateNgnMinor, sellingRateMinor)), markupBps: Number(markupBps(providerRateNgnMinor, sellingRateMinor)), active, autoImported: true, customSellingRateMinor: FieldValue.delete(), marginBps: FieldValue.delete(), updatedAt: FieldValue.serverTimestamp(), ...(existing ? {} : { createdAt: FieldValue.serverTimestamp() }) }, { merge: true });
     changed += 1; repriced += 1;
   }
 

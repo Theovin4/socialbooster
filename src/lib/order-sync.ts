@@ -6,6 +6,7 @@ import { getProvider, normalizeProviderKey } from "./providers";
 import { verifiedProviderStatus } from "./order-status";
 import { sendUserEmail } from "./email";
 import { orderStatusEmailCopy, shouldSendOrderStatusEmail } from "./order-email-policy";
+import { terminalRefundDecision } from "./order-refund-policy";
 
 const STALE_AFTER_MS = 60_000;
 
@@ -44,10 +45,19 @@ export async function synchronizeOrderDocuments(documents: DocumentSnapshot[], f
     if (!provider) continue;
     const startCount = integer(provider.start_count);
     const remains = integer(provider.remains);
-    const status = verifiedProviderStatus(provider.status, startCount, remains);
+    const candidateStatus = verifiedProviderStatus(provider.status, startCount, remains);
     const previous = doc.get("status");
-    console.info("[order-sync] provider status", { orderId: doc.id, providerKey, providerOrderId: doc.get("providerOrderId"), providerStatus: provider.status, resolvedStatus: status, startCount, remains });
+    const quantity = integer(String(doc.get("quantity") ?? "")) || 0;
+    const firstObservedAtMs = doc.get("refundReviewFirstSeenAt")?.toMillis?.() || null;
+    const refundDecision = terminalRefundDecision({ status: candidateStatus, quantity, remains, previousObservation: doc.get("refundReviewStatus") || null, firstObservedAtMs, nowMs: now });
+    const status = ["stage", "hold", "reject"].includes(refundDecision) ? previous : candidateStatus;
+    console.info("[order-sync] provider status", { orderId: doc.id, providerKey, providerOrderId: doc.get("providerOrderId"), providerStatus: provider.status, resolvedStatus: candidateStatus, persistedStatus: status, refundDecision, startCount, remains });
     const update: Record<string, unknown> = { status, providerStatus: provider.status, providerCharge: provider.charge || null, lastProviderUpdate: FieldValue.serverTimestamp(), updatedAt: FieldValue.serverTimestamp() };
+    if (refundDecision === "stage") Object.assign(update, { refundReviewStatus: candidateStatus, refundReviewFirstSeenAt: FieldValue.serverTimestamp(), refundReviewConfirmations: 1 });
+    if (refundDecision === "hold") update.refundReviewConfirmations = FieldValue.increment(1);
+    if (refundDecision === "confirm") Object.assign(update, { refundReviewConfirmedAt: FieldValue.serverTimestamp(), refundReviewConfirmations: FieldValue.increment(1) });
+    if (refundDecision === "reject") Object.assign(update, { refundReviewRejectedAt: FieldValue.serverTimestamp(), refundReviewReason: "Provider terminal response did not include valid refundable quantities" });
+    if (refundDecision === "none") Object.assign(update, { refundReviewStatus: FieldValue.delete(), refundReviewFirstSeenAt: FieldValue.delete(), refundReviewConfirmations: FieldValue.delete(), refundReviewReason: FieldValue.delete() });
     if (startCount !== null) update.startCount = startCount;
     if (remains !== null) update.remains = remains;
     await doc.ref.set(update, { merge: true });
@@ -61,13 +71,17 @@ export async function synchronizeOrderDocuments(documents: DocumentSnapshot[], f
         await sendUserEmail(String(doc.get("userId")), { ...copy, buttonLabel: "View order", buttonUrl: `${process.env.NEXT_PUBLIC_APP_URL || "https://www.socialbooster.net.ng"}/dashboard/orders/${doc.id}` }).then(() => doc.ref.set({ ...(status === "completed" ? { customerRoutineEmailCount: FieldValue.increment(1) } : {}), lastCustomerEmailStatus: status, lastCustomerEmailAt: FieldValue.serverTimestamp() }, { merge: true })).catch((error) => console.warn("[order-email] delivery failed", { orderId: doc.id, error: error instanceof Error ? error.message : "Unknown error" }));
       }
     }
-    if (["failed", "cancelled", "partial"].includes(status)) {
-      const quantity = integer(String(doc.get("quantity") ?? "")) || 0;
+    if (["stage", "reject"].includes(refundDecision)) await db.collection("auditLogs").add({ action: refundDecision === "stage" ? "order_refund_staged" : "order_refund_evidence_rejected", targetType: "order", targetId: doc.id, providerKey, providerOrderId: doc.get("providerOrderId"), candidateStatus, startCount, remains, quantity, createdAt: FieldValue.serverTimestamp() });
+    if (refundDecision === "confirm") {
       const sellingRateMinor = integer(String(doc.get("sellingRateMinor") ?? "")) || 0;
       const customerPriceMinor = integer(String(doc.get("customerPriceMinor") ?? "")) || 0;
-      const refundableQuantity = status === "partial" ? BigInt(remains || 0) : BigInt(quantity);
+      const refundableQuantity = candidateStatus === "partial" ? BigInt(remains || 0) : BigInt(quantity);
       const refund = Number(serviceCostMinor(BigInt(sellingRateMinor), refundableQuantity));
-      if (refund > 0 && customerPriceMinor > 0) await postWallet({ userId: doc.get("userId"), type: "refund", deltaMinor: Math.min(refund, customerPriceMinor), currency: String(doc.get("currency") || "NGN"), idempotencyKey: `status-refund:${doc.id}`, reference: doc.id, reason: `Order ${status}` });
+      if (refund > 0 && customerPriceMinor > 0) {
+        const amount = Math.min(refund, customerPriceMinor);
+        const result = await postWallet({ userId: doc.get("userId"), type: "refund", deltaMinor: amount, currency: String(doc.get("currency") || "NGN"), idempotencyKey: `status-refund:${doc.id}`, reference: doc.id, reason: `Order ${candidateStatus} after confirmed provider status` });
+        await db.collection("auditLogs").add({ action: "order_refund_confirmed", targetType: "order", targetId: doc.id, providerKey, providerOrderId: doc.get("providerOrderId"), candidateStatus, amountMinor: amount, duplicate: result.duplicate, createdAt: FieldValue.serverTimestamp() });
+      }
     }
   }
   return { checked: eligible.length, updated };

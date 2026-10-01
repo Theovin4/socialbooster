@@ -7,6 +7,7 @@ import { FirebaseError } from "firebase/app";
 import { browserSessionPersistence, createUserWithEmailAndPassword, getRedirectResult, GoogleAuthProvider, inMemoryPersistence, sendEmailVerification, sendPasswordResetEmail, setPersistence, signInWithEmailAndPassword, signInWithPopup, signInWithRedirect, updateProfile, type User } from "firebase/auth";
 import { Eye, EyeOff } from "lucide-react";
 import { firebaseAuth } from "@/lib/firebase/client";
+import { trackAnalyticsEvent } from "@/lib/analytics";
 import { Toast, type ToastKind } from "./toast";
 
 type Notice = { kind: ToastKind; title: string; message: string };
@@ -36,9 +37,10 @@ export function AuthForm({ mode, initialNotice, returnTo }: { mode: "login" | "r
     const response = await fetch("/api/auth/session", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ idToken: await user.getIdToken(true) }) });
     if (!response.ok) { console.error("[auth] session endpoint rejected sign-in", { status: response.status }); throw new Error("SESSION_FAILED"); }
     const session = await response.json() as { admin?: boolean };
+    if (mode === "register") trackAnalyticsEvent("register_complete", { method: "google" });
     await firebaseAuth().signOut();
     router.push(destination(session.admin)); router.refresh();
-  }, [destination, router]);
+  }, [destination, mode, router]);
   useEffect(() => {
     let active = true;
     getRedirectResult(firebaseAuth()).then(async (credential) => {
@@ -53,6 +55,7 @@ export function AuthForm({ mode, initialNotice, returnTo }: { mode: "login" | "r
   }, [establishSession, mode]);
   async function googleSignIn() {
     setBusy(true); setNotice(undefined);
+    if (mode === "register") trackAnalyticsEvent("register_start", { method: "google" });
     try {
       const auth = firebaseAuth();
       const provider = new GoogleAuthProvider(); provider.setCustomParameters({ prompt: "select_account" });
@@ -83,6 +86,7 @@ export function AuthForm({ mode, initialNotice, returnTo }: { mode: "login" | "r
       if (mode === "reset") { const response = await fetch("/api/auth/email", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ type: "reset", email }) }); if (!response.ok) await sendPasswordResetEmail(auth, email, actionSettings); router.push("/login?notice=reset-sent"); return; }
       await setPersistence(auth, inMemoryPersistence);
       if (mode === "register") {
+        trackAnalyticsEvent("register_start", { method: "email" });
         if (!firstName || !lastName) throw new Error("FULL_NAME_REQUIRED");
         const credential = await createUserWithEmailAndPassword(auth, email, password);
         await updateProfile(credential.user, { displayName: `${firstName} ${lastName}` });
@@ -91,6 +95,7 @@ export function AuthForm({ mode, initialNotice, returnTo }: { mode: "login" | "r
         catch { await sendEmailVerification(credential.user, actionSettings).catch(() => undefined); }
         const response = await fetch("/api/auth/session", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ idToken }) });
         if (!response.ok) throw new Error("SESSION_FAILED");
+        trackAnalyticsEvent("register_complete", { method: "email" });
         await auth.signOut(); router.push("/dashboard?notice=account-created"); router.refresh(); return;
       }
       const credential = await signInWithEmailAndPassword(auth, email, password);

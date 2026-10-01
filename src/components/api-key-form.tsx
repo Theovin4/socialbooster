@@ -1,12 +1,14 @@
 "use client";
 
-import { useActionState } from "react";
+import { useActionState, useEffect } from "react";
 import { createApiKey, type ApiKeyActionState } from "@/app/dashboard/api/actions";
+import { trackAnalyticsEvent } from "@/lib/analytics";
 
 const initialState: ApiKeyActionState = { status: "idle", message: "" };
 
 export function ApiKeyForm() {
   const [state, action, pending] = useActionState(createApiKey, initialState);
+  useEffect(() => { if (state.status === "success" && state.key) trackAnalyticsEvent("api_key_created"); }, [state.key, state.status]);
   return <div>
     <form action={action} style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
       <input className="field" name="label" maxLength={50} placeholder="Key name, e.g. Website integration" aria-label="API key name" required />

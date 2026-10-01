@@ -12,7 +12,7 @@ export type OperationalTotals = {
 
 const STATS_COLLECTION = "stats";
 const TOTALS_DOCUMENT = "totals";
-const RECONCILIATION_VERSION = 2;
+const RECONCILIATION_VERSION = 3;
 
 export function lagosDateKey(date = new Date()) {
   const parts = new Intl.DateTimeFormat("en-CA", {

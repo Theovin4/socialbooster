@@ -1,4 +1,4 @@
-import { serviceCostMinor, sellingPriceMinor } from "./money";
+import { DEFAULT_GROSS_MARGIN_BPS, serviceCostMinor, sellingPriceForGrossMarginMinor } from "./money";
 
 export const SUPPORTED_CURRENCIES = ["USD", "GBP", "EUR", "NGN", "CAD", "AUD"] as const;
 export type SupportedCurrency = typeof SUPPORTED_CURRENCIES[number];
@@ -20,17 +20,17 @@ export function convertMinor(amountMinor: bigint, rateMicros: bigint) {
   return (amountMinor * rateMicros + RATE_SCALE - 1n) / RATE_SCALE;
 }
 
-export function quoteService(input: { ratePerThousandMinor: bigint; quantity: bigint; marginBps?: bigint; exchangeRateMicros?: bigint }) {
+export function quoteService(input: { ratePerThousandMinor: bigint; quantity: bigint; grossMarginBps?: bigint; exchangeRateMicros?: bigint }) {
   const providerCostMinor = serviceCostMinor(input.ratePerThousandMinor, input.quantity);
   const convertedProviderCostMinor = input.exchangeRateMicros ? convertMinor(providerCostMinor, input.exchangeRateMicros) : providerCostMinor;
-  const customerPriceMinor = sellingPriceMinor(convertedProviderCostMinor, input.marginBps);
+  const customerPriceMinor = sellingPriceForGrossMarginMinor(convertedProviderCostMinor, input.grossMarginBps);
   return { providerCostMinor, convertedProviderCostMinor, customerPriceMinor };
 }
 
-export function serviceSellingRateNgnMinor(service: { providerRateMinor?: unknown; sellingRateMinor?: unknown; pricingModel?: unknown; markupBps?: unknown }) {
+export function serviceSellingRateNgnMinor(service: { providerRateMinor?: unknown; sellingRateMinor?: unknown; pricingModel?: unknown; grossMarginTargetBps?: unknown }) {
   const providerRateMinor = Number(service.providerRateMinor);
   if (!Number.isSafeInteger(providerRateMinor) || providerRateMinor < 0) throw new Error("Invalid provider service rate");
   // Customer prices are always derived from current NGN provider cost. Do not
   // trust a stale or manually altered stored selling price.
-  return sellingPriceMinor(BigInt(providerRateMinor), 4000n);
+  return sellingPriceForGrossMarginMinor(BigInt(providerRateMinor), DEFAULT_GROSS_MARGIN_BPS);
 }

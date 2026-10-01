@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 import { Toast } from "./toast";
+import { trackAnalyticsEvent } from "@/lib/analytics";
 
 export function FundWallet() {
   const [busy, setBusy] = useState(false);
@@ -10,6 +11,7 @@ export function FundWallet() {
     setBusy(true);
     setMessage("");
     try {
+      trackAnalyticsEvent("wallet_fund_start", { method: "flutterwave" });
       const response = await fetch("/api/payments/flutterwave/initialize", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ amount: form.get("amount"), currency: "NGN" }) });
       const data = await response.json();
       if (!response.ok) throw new Error(data.error || "Payment could not start");
