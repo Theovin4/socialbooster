@@ -17,6 +17,7 @@ export function validateWalletEntry(input: WalletEntry) {
   if (input.type === "order_debit" && input.deltaMinor > 0) throw new Error("Order debits must be negative");
   if (["deposit", "refund", "promotional_credit"].includes(input.type) && input.deltaMinor < 0) throw new Error("Wallet credit must be positive");
   if (input.type === "admin_adjustment" && (!input.reason || input.reason.trim().length < 5)) throw new Error("Admin adjustments require a reason");
+  if (input.type === "refund" && (!input.reason || input.reason.trim().length < 5)) throw new Error("Refunds require a reason");
 }
 
 export async function ensureWallet(userId: string, currency = "NGN") {
@@ -52,7 +53,7 @@ export async function postWallet(input: WalletEntry) {
     transaction.set(walletRef, { userId: input.userId, currency, availableMinor: next, reservedMinor: reserved, balanceMinor: next, version: FieldValue.increment(1), updatedAt: FieldValue.serverTimestamp(), ...(wallet.exists ? {} : { createdAt: FieldValue.serverTimestamp() }) }, { merge: true });
     transaction.create(transactionRef, { ...input, balanceBeforeMinor: current, balanceAfterMinor: next, status: "posted", createdAt: FieldValue.serverTimestamp() });
     transaction.create(ledgerRef, { walletUserId: input.userId, transactionId: transactionRef.id, type: input.type, deltaMinor: input.deltaMinor, currency, balanceBeforeMinor: current, balanceAfterMinor: next, reference: input.reference || null, reason: input.reason || null, actorUid: input.actorUid || null, createdAt: FieldValue.serverTimestamp() });
-    if (input.type === "admin_adjustment") transaction.create(auditRef, { action: "wallet_admin_adjustment", targetType: "wallet", targetId: input.userId, transactionId: transactionRef.id, deltaMinor: input.deltaMinor, currency, reason: input.reason, actorUid: input.actorUid, createdAt: FieldValue.serverTimestamp() });
+    if (input.type === "admin_adjustment" || input.type === "refund") transaction.create(auditRef, { action: input.type === "refund" ? "wallet_refund_posted" : "wallet_admin_adjustment", targetType: "wallet", targetId: input.userId, transactionId: transactionRef.id, reference: input.reference || null, deltaMinor: input.deltaMinor, currency, reason: input.reason, actorUid: input.actorUid || null, createdAt: FieldValue.serverTimestamp() });
     return { transactionId: transactionRef.id, duplicate: false };
   });
   if (!result.duplicate && input.deltaMinor > 0) await sendAdminAlert({ subject: `Wallet credit: ${input.currency} ${(input.deltaMinor / 100).toLocaleString("en-NG", { minimumFractionDigits: 2 })}`, title: "Customer wallet credited", message: `A ${input.type.replaceAll("_", " ")} of ${input.currency} ${(input.deltaMinor / 100).toLocaleString("en-NG", { minimumFractionDigits: 2 })} was posted for customer ${input.userId}. Reference: ${input.reference || result.transactionId}.`, buttonLabel: "View transactions", buttonUrl: `${process.env.NEXT_PUBLIC_APP_URL || "https://www.socialbooster.net.ng"}/admin/transactions` }).catch((error) => console.warn("[admin-credit-email] delivery failed", { transactionId: result.transactionId, error: error instanceof Error ? error.message : "Unknown error" }));

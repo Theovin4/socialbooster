@@ -5,6 +5,7 @@ const valid = { userId: "firebase-user-123", type: "admin_adjustment" as const, 
 describe("wallet validation", () => {
   it("accepts an audited adjustment", () => expect(() => validateWalletEntry(valid)).not.toThrow());
   it("requires an adjustment reason", () => expect(() => validateWalletEntry({ ...valid, reason: "" })).toThrow("require a reason"));
+  it("requires every refund to carry an audit reason", () => expect(() => validateWalletEntry({ ...valid, type: "refund", reason: "" })).toThrow("Refunds require a reason"));
   it("blocks positive order debits", () => expect(() => validateWalletEntry({ ...valid, type: "order_debit", reason: undefined })).toThrow("must be negative"));
   it("blocks unsupported currencies and unsafe amounts", () => { expect(() => validateWalletEntry({ ...valid, currency: "BTC" })).toThrow(); expect(() => validateWalletEntry({ ...valid, deltaMinor: Number.MAX_SAFE_INTEGER + 1 })).toThrow(); });
   it("blocks malformed idempotency keys", () => expect(() => validateWalletEntry({ ...valid, idempotencyKey: "bad/key" })).toThrow());
