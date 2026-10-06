@@ -4,7 +4,7 @@ import { isFirestoreQuotaError } from "@/lib/firebase/errors";
 import { isProviderKey, type ProviderKey } from "@/lib/providers";
 import { FieldPath } from "firebase-admin/firestore";
 import Link from "next/link";
-import { approveService, setServiceActive, setServicePriceOverride, syncAllServices } from "./actions";
+import { approveService, setServiceGovernance, setServicePriceOverride, syncAllServices } from "./actions";
 
 export const dynamic = "force-dynamic";
 export const maxDuration = 300;
@@ -75,16 +75,26 @@ export default async function AdminServices({ searchParams }: { searchParams: Pr
                 <div>
                   <p className="eyebrow" style={{ margin: 0 }}>{provider.categoryName}</p>
                   <h2 style={{ fontSize: 18, margin: "8px 0" }}>{provider.name}</h2>
+                  {local?.publicName ? <p style={{ margin: "0 0 8px" }}><strong>Public name:</strong> {String(local.publicName)}</p> : null}
                   <p className="muted" style={{ margin: 0 }}>{provider.providerLabel || "Followpanel"} · ID {provider.providerServiceId || doc.id} · Cost {provider.providerCurrency || "NGN"} {provider.rateText}/1,000 · Min {provider.minQuantity} · Max {provider.maxQuantity} · Refill {provider.refillSupported ? "Yes" : "No"} · Cancel {provider.cancelSupported ? "Yes" : "No"}</p>
+                  {local ? <p className="muted" style={{ margin: "8px 0 0" }}>Public: {active ? "Published" : "Hidden"} · Featured: {local.featured ? "Yes" : "No"} · Search index: {local.seoEligible ? "Approved" : "Noindex"} · Ads: {local.paidAdsEligible ? "Eligible" : "Not approved"} · Review flag: {local.flaggedForReview ? "Yes" : "No"}</p> : null}
                 </div>
                 {local ? (
                   <div style={{ display: "grid", gap: 8, minWidth: 210 }}>
-                    <form action={setServicePriceOverride}><input type="hidden" name="id" value={doc.id} /><button className="btn" style={{ width: "100%" }}>Reset to provider price + 40%</button></form>
+                    <form action={setServicePriceOverride}><input type="hidden" name="id" value={doc.id} /><button className="btn" style={{ width: "100%" }}>Reset to 40% gross margin</button></form>
                     {local.belowMinimumMargin ? <small style={{ color: "#fbbf24" }}>Warning: this override is below the configured minimum margin.</small> : null}
-                    <form action={setServiceActive}><input type="hidden" name="id" value={doc.id} /><input type="hidden" name="active" value={active ? "false" : "true"} /><button className={`btn ${active ? "" : "primary"}`} style={{ width: "100%" }}>{active ? "Disable" : "Enable"}</button></form>
+                    <div style={{ display: "grid", gridTemplateColumns: "repeat(2,minmax(0,1fr))", gap: 8 }}>
+                      {[
+                        [active ? "unpublish" : "publish", active ? "Unpublish" : "Publish"],
+                        [local.featured ? "unfeature" : "feature", local.featured ? "Unfeature" : "Feature"],
+                        [local.flaggedForReview ? "clear_flag" : "flag", local.flaggedForReview ? "Clear flag" : "Flag review"],
+                        [local.seoEligible ? "seo_off" : "seo_on", local.seoEligible ? "Noindex" : "Approve SEO"],
+                        [local.paidAdsEligible ? "ads_off" : "ads_on", local.paidAdsEligible ? "Remove ads" : "Ads eligible"],
+                      ].map(([operation, label]) => <form action={setServiceGovernance} key={operation}><input type="hidden" name="id" value={doc.id} /><input type="hidden" name="operation" value={operation} /><button className="btn" style={{ width: "100%", paddingInline: 8 }}>{label}</button></form>)}
+                    </div>
                   </div>
                 ) : (
-                  <form action={approveService}><input type="hidden" name="id" value={doc.id} /><button className="btn primary">Approve at provider price + 40%</button></form>
+                  <form action={approveService}><input type="hidden" name="id" value={doc.id} /><button className="btn primary">Approve at 40% gross margin</button></form>
                 )}
               </article>
             );

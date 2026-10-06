@@ -1,5 +1,6 @@
 import Link from "next/link";
 import { AggregateField } from "firebase-admin/firestore";
+import { unstable_cache } from "next/cache";
 import { AppShell } from "@/components/app-shell";
 import { Toast } from "@/components/toast";
 import { adminDb } from "@/lib/firebase/admin";
@@ -77,11 +78,13 @@ async function aggregateDashboardMetrics() {
   };
 }
 
+const getCachedAggregateDashboardMetrics = unstable_cache(aggregateDashboardMetrics, ["admin-dashboard-aggregates-v2"], { revalidate: 300 });
+
 export default async function Admin({ searchParams }: { searchParams: Promise<{ period?: string; activation?: string; sent?: string; skipped?: string; failed?: string }> }) {
   await requireAdmin();
   const params = await searchParams, requestedPeriod = params.period, period: Period = requestedPeriod && requestedPeriod in periods ? requestedPeriod as Period : "30";
   let dataAvailable = true;
-  const results = await Promise.allSettled([getOperationalTotals(), aggregateDashboardMetrics()] as const);
+  const results = await Promise.allSettled([getOperationalTotals(), getCachedAggregateDashboardMetrics()] as const);
   for (const [index, result] of results.entries()) if (result.status === "rejected") {
     dataAvailable = false;
     console.error("[admin-dashboard] metric unavailable", { metric: index === 0 ? "totals" : "aggregates", error: result.reason instanceof Error ? result.reason.message : "Unknown error" });
@@ -109,6 +112,6 @@ export default async function Admin({ searchParams }: { searchParams: Promise<{ 
     <span className="eyebrow">Protected operations</span><h1 className="page-heading">Administration overview</h1><p className="muted page-lead">Live customer growth, payments and operational totals. This area is protected by a server-verified administrator claim.</p>
     <div className="grid3" style={{ gridTemplateColumns: "repeat(auto-fit,minmax(220px,1fr))" }}>{cards.map(([label, value]) => <article className="glass card stat-card" key={label}><span className="muted">{label}</span><strong className="stat-value">{value}</strong></article>)}</div>
     <section className="glass card" style={{ marginTop: 22 }}><div className="section-head"><div><span className="eyebrow">Customer growth</span><h2 style={{ marginBottom: 0 }}>New customer accounts</h2></div><form method="get" style={{ display: "flex", gap: 10, flexWrap: "wrap" }}><label className="sr-only" htmlFor="growth-period">Growth period</label><select className="field" id="growth-period" name="period" defaultValue={period}>{Object.entries(periods).map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select><button className="btn" type="submit">Apply filter</button></form></div><p className="muted">{customers ? `${customers.selectedCount.toLocaleString("en-NG")} customers joined during ${periods[period].toLowerCase()}.` : "Growth data is temporarily unavailable."}</p><div style={{ display: "grid", gap: 12 }}>{customers?.buckets.map((bucket) => <div key={bucket.label} style={{ display: "grid", gridTemplateColumns: "90px 1fr 48px", gap: 12, alignItems: "center" }}><span className="muted">{bucket.label}</span><div style={{ height: 10, borderRadius: 999, background: "var(--line)", overflow: "hidden" }}><div style={{ width: `${Math.max(bucket.count ? 4 : 0, bucket.count / maximum * 100)}%`, height: "100%", background: "linear-gradient(90deg,#28c7ef,#6667f4)" }} /></div><strong>{bucket.count}</strong></div>)}</div></section>
-    <div className="glass card" style={{ marginTop: 22 }}><div className="section-head"><div><span className="eyebrow">Operations</span><h2 style={{ marginBottom: 0 }}>Administrative controls</h2></div></div><div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}><Link className="btn primary" href="/admin/services">Manage services</Link><Link className="btn" href="/admin/transactions">Reconcile payment</Link><Link className="btn" href="/admin/wallets">Review wallets</Link><form action={sendActivationRecovery}><button className="btn" type="submit">Send recent activation emails</button></form></div></div>
+    <div className="glass card" style={{ marginTop: 22 }}><div className="section-head"><div><span className="eyebrow">Operations</span><h2 style={{ marginBottom: 0 }}>Administrative controls</h2></div></div><div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}><Link className="btn primary" href="/admin/services">Manage services</Link><Link className="btn" href="/admin/transactions">Reconcile payment</Link><Link className="btn" href="/admin/wallets">Review wallets</Link><Link className="btn" href="/admin/operations">Review Firebase cost</Link><Link className="btn" href="/admin/seo">Review search health</Link><form action={sendActivationRecovery}><button className="btn" type="submit">Send recent activation emails</button></form></div></div>
   </AppShell>;
 }

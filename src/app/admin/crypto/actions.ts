@@ -10,6 +10,7 @@ import { postWallet } from "@/lib/firebase/wallet";
 import { cryptoCreditMinor, verifyCryptoPayment, type CryptoNetwork } from "@/lib/payments/crypto";
 import { reverifyCryptoDeposit } from "@/lib/payments/crypto-reconcile";
 import { sendUserEmail } from "@/lib/email";
+import { recordFundingMarketing } from "@/lib/marketing-profile";
 
 const decisionSchema = z.object({ id: z.string().min(10), decision: z.enum(["approve", "reject", "cancel", "recheck"]), reason: z.string().trim().max(300).optional() });
 
@@ -36,6 +37,7 @@ export async function decideCryptoDeposit(formData: FormData) {
       const posted = await postWallet({ userId: String(snapshot.get("userId")), type: "deposit", deltaMinor: creditedNgnMinor, currency: "NGN", idempotencyKey: `crypto:${String(snapshot.get("network"))}:${txHash}`, reference: ref.id });
       await ref.set({ status: "approved", approvedBy: admin.uid, approvedAt: FieldValue.serverTimestamp(), verifiedAmount: verification.amount, confirmations: verification.confirmations, creditedNgnMinor, paymentVarianceAsset: verification.amount - expectedAssetAmount, walletTransactionId: posted.transactionId, updatedAt: FieldValue.serverTimestamp() }, { merge: true });
       await db.collection("auditLogs").add({ action: "crypto_deposit_approved", targetType: "cryptoDeposit", targetId: ref.id, txHash, userId: snapshot.get("userId"), requestedNgnMinor, creditedNgnMinor, verifiedAmount: verification.amount, actorUid: admin.uid, createdAt: FieldValue.serverTimestamp() });
+      if (!posted.duplicate) await recordFundingMarketing(String(snapshot.get("userId")), "crypto").catch((error) => console.warn("[crypto-marketing-profile] update failed", { depositId: ref.id, error: error instanceof Error ? error.message : "Unknown error" }));
       await sendUserEmail(String(snapshot.get("userId")), { subject: "Your crypto payment has been credited", title: "Payment verified and credited", message: `Your confirmed crypto payment has added NGN ${(creditedNgnMinor / 100).toLocaleString("en-NG", { minimumFractionDigits: 2 })} to your Social Booster wallet.`, buttonLabel: "View wallet", buttonUrl: `${process.env.NEXT_PUBLIC_APP_URL || "https://www.socialbooster.net.ng"}/dashboard/wallet` }).catch((error) => console.warn("[crypto-decision-email] delivery failed", { depositId: ref.id, error: error instanceof Error ? error.message : "Unknown error" }));
       outcome = "approved";
     } else {

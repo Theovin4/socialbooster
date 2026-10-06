@@ -4,6 +4,9 @@ import { FieldPath } from "firebase-admin/firestore";
 import { serviceSellingRateNgnMinor } from "./currency";
 import { adminDb } from "./firebase/admin";
 import { publicServiceId } from "./service-public-id";
+import { normalizePublicServiceName } from "./service-quality";
+import { providerDefinitions } from "./providers";
+import { PUBLIC_CATALOG_SNAPSHOT_VERSION, type PublicCatalogSnapshotItem } from "./public-catalog-snapshot";
 
 export { publicServiceId } from "./service-public-id";
 
@@ -22,6 +25,9 @@ export type CachedService = {
   cancel: boolean;
   rateMinor: number;
   updatedAt: string | null;
+  seoEligible: boolean;
+  featured: boolean;
+  paidAdsEligible: boolean;
 };
 
 export type ServiceCatalogPage = {
@@ -42,7 +48,7 @@ function getCatalogChunk(afterId: string) {
     let query = adminDb().collection("services")
       .where("active", "==", true)
       .orderBy(FieldPath.documentId())
-      .select("name", "categoryName", "type", "minQuantity", "maxQuantity", "refillSupported", "cancelSupported", "providerRateMinor", "updatedAt")
+      .select("name", "publicName", "categoryName", "type", "minQuantity", "maxQuantity", "refillSupported", "cancelSupported", "providerRateMinor", "updatedAt", "seoEligible", "featured", "paidAdsEligible")
       .limit(CATALOG_CHUNK_SIZE);
     if (afterId) query = query.startAfter(afterId);
     const snapshot = await query.get();
@@ -51,7 +57,7 @@ function getCatalogChunk(afterId: string) {
     return {
       id: publicServiceId(doc.id),
       internalId: doc.id,
-      name: String(item.name || "Service"),
+      name: String(item.publicName || normalizePublicServiceName(String(item.name || "Service"), String(item.categoryName || "Other"))),
       category: String(item.categoryName || "Other"),
       type: String(item.type || "default"),
       // Keep the shared list cache compact. Full descriptions remain in the
@@ -64,17 +70,35 @@ function getCatalogChunk(afterId: string) {
       cancel: item.cancelSupported === true,
       rateMinor: Number(serviceSellingRateNgnMinor(item)),
       updatedAt: item.updatedAt?.toDate?.().toISOString?.() || null,
+      seoEligible: item.seoEligible === true,
+      featured: item.featured === true,
+      paidAdsEligible: item.paidAdsEligible === true,
     };
     });
     return { items, lastId: snapshot.docs.at(-1)?.id || null, hasMore: snapshot.size === CATALOG_CHUNK_SIZE };
-  }, ["active-service-catalog-v5-chunk", afterId || "start"], { revalidate: 86_400, tags: [SERVICE_CATALOG_TAG] })();
+  }, ["active-service-catalog-v7-chunk", afterId || "start"], { revalidate: 86_400, tags: [SERVICE_CATALOG_TAG] })();
 }
+
+const getMaterializedCatalog = unstable_cache(async (): Promise<CachedService[] | null> => {
+  const db = adminDb();
+  const providers = providerDefinitions().filter((provider) => provider.configured).map((provider) => provider.key);
+  if (!providers.length) return null;
+  const manifests = await db.getAll(...providers.map((provider) => db.collection("publicCatalogManifests").doc(provider)));
+  if (manifests.some((snapshot) => !snapshot.exists || snapshot.get("version") !== PUBLIC_CATALOG_SNAPSHOT_VERSION)) return null;
+  const refs = manifests.flatMap((manifest) => Array.from({ length: Number(manifest.get("chunkCount") || 0) }, (_, index) => db.collection("publicCatalogChunks").doc(`${manifest.id}_${String(index).padStart(4, "0")}`)));
+  if (!refs.length) return [];
+  const chunks = await db.getAll(...refs);
+  const items = chunks.flatMap((snapshot) => snapshot.exists && snapshot.get("version") === PUBLIC_CATALOG_SNAPSHOT_VERSION ? snapshot.get("items") as PublicCatalogSnapshotItem[] : []).filter((item) => item.active !== false);
+  return items.map((item) => ({ ...item, updatedAt: item.updatedAt || null }));
+}, ["active-service-catalog-materialized-v1"], { revalidate: 86_400, tags: [SERVICE_CATALOG_TAG] });
 
 /**
  * The catalogue is shared by every visitor. It is cached in bounded chunks so
  * no Vercel cache item can exceed the 2 MB platform limit.
  */
 export async function getActiveServiceCatalog(): Promise<CachedService[]> {
+  const materialized = await getMaterializedCatalog();
+  if (materialized) return materialized.sort((a, b) => a.category.localeCompare(b.category) || a.name.localeCompare(b.name));
   const catalog: CachedService[] = [];
   let afterId = "";
   for (let page = 0; page < 100; page += 1) {
@@ -120,7 +144,7 @@ async function buildServiceCatalogPage(input: ServiceCatalogPageInput): Promise<
 const getCachedServiceCatalogPage = unstable_cache(
   async (query: string, category: string, page: number, pageSize: number, selectedId: string) =>
     buildServiceCatalogPage({ query, category, page, pageSize, selectedId }),
-  ["active-service-catalog-v6-page"],
+  ["active-service-catalog-v8-page"],
   { revalidate: 86_400, tags: [SERVICE_CATALOG_TAG] },
 );
 
@@ -139,6 +163,10 @@ export async function getServiceCatalogPage(input: ServiceCatalogPageInput = {})
     pageSize,
     (input.selectedId || "").trim(),
   );
+}
+
+export async function getSeoEligibleServiceCatalog() {
+  return (await getActiveServiceCatalog()).filter((service) => service.seoEligible);
 }
 
 /**

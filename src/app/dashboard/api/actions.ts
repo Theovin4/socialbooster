@@ -5,6 +5,7 @@ import { revalidatePath } from "next/cache";
 import { adminDb } from "@/lib/firebase/admin";
 import { requireUser } from "@/lib/firebase/session";
 import { generateCustomerApiKey, hashCustomerApiKey } from "@/lib/customer-api";
+import { recordApiUserMarketing } from "@/lib/marketing-profile";
 
 export type ApiKeyActionState = { status: "idle" | "success" | "error"; message: string; key?: string };
 
@@ -15,6 +16,7 @@ export async function createApiKey(_: ApiKeyActionState, formData: FormData): Pr
   if (existing.docs.filter((doc) => doc.get("status") === "active").length >= 3) return { status: "error", message: "Revoke an existing key before creating another one." };
   const key = generateCustomerApiKey(), hash = hashCustomerApiKey(key);
   await db.collection("customerApiKeys").doc(hash).create({ userId: user.uid, label, prefix: `${key.slice(0, 15)}…`, status: "active", createdAt: FieldValue.serverTimestamp(), lastUsedAt: null, rateWindowStart: 0, rateWindowCount: 0 });
+  await recordApiUserMarketing(user.uid).catch((error) => console.warn("[api-key] marketing profile update failed", { userId: user.uid, error: error instanceof Error ? error.message : "Unknown error" }));
   revalidatePath("/dashboard/api");
   return { status: "success", message: "Copy this key now. It will not be shown again.", key };
 }

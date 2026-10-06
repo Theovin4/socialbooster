@@ -85,7 +85,7 @@ export default async function OrderPage({
     });
   return (
     <AppShell>
-      {notice === "order-created" ? <AnalyticsEvent event="order_success" parameters={{ service_id: order.serviceId ? publicServiceId(String(order.serviceId)) : "unknown" }} /> : null}
+      {notice === "order-created" ? <><AnalyticsEvent event="order_success" parameters={{ service_id: order.serviceId ? publicServiceId(String(order.serviceId)) : "unknown" }} deduplicationKey={`order_success:${id}`} /><AnalyticsEvent event="purchase" deduplicationKey={`purchase:${id}`} parameters={{ transaction_id: id, currency: String(order.currency || "NGN"), value: Number(order.customerPriceMinor || 0) / 100, items: [{ item_id: order.serviceId ? publicServiceId(String(order.serviceId)) : "unknown", item_name: String(order.serviceName || "Social media service"), quantity: Number(order.quantity || 1), price: Number(order.customerPriceMinor || 0) / 100 / Math.max(1, Number(order.quantity || 1)) }] }} /></> : null}
       {notice === "order-created" ? (
         <Toast
           kind="success"

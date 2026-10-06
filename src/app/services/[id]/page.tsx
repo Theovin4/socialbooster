@@ -10,13 +10,13 @@ import { formatMoney } from "@/lib/money";
 import { resolveServiceIdentifier } from "@/lib/service-catalog";
 
 export const dynamic = "force-dynamic";
-type Service = { name: string; description?: string; categoryName: string; type: string; minQuantity: number; maxQuantity: number; refillSupported: boolean; cancelSupported: boolean; sellingRateMinor: number; sellingCurrency?: string; active: boolean };
-const getService = cache(async (identifier: string) => { const match = await resolveServiceIdentifier(identifier); if (!match) return null; const snapshot = await adminDb().collection("services").doc(match.internalId).get(); if (!snapshot.exists || snapshot.data()?.active !== true) return null; return { service: snapshot.data() as Service, publicId: match.id }; });
+type Service = { name: string; publicName?: string; description?: string; categoryName: string; type: string; minQuantity: number; maxQuantity: number; refillSupported: boolean; cancelSupported: boolean; sellingRateMinor: number; sellingCurrency?: string; active: boolean };
+const getService = cache(async (identifier: string) => { const match = await resolveServiceIdentifier(identifier); if (!match) return null; const snapshot = await adminDb().collection("services").doc(match.internalId).get(); if (!snapshot.exists || snapshot.data()?.active !== true) return null; return { service: { ...(snapshot.data() as Service), name: match.name }, publicId: match.id, seoEligible: match.seoEligible }; });
 
 export async function generateMetadata({ params }: { params: Promise<{ id: string }> }): Promise<Metadata> {
   const { id } = await params;
   const result = await getService(id);
-  return result ? { title: `${result.service.name} | Social Media Service`, description: `View the current price, order limits and support options for ${result.service.name}. Available to eligible customers in Nigeria and across Africa.`, alternates: { canonical: `/services/${result.publicId}` }, openGraph: { title: result.service.name, description: `Compare the price and order requirements for this ${result.service.categoryName} service.` } } : { title: "Service not found", robots: { index: false } };
+  return result ? { title: `${result.service.name} | Social Media Service`, description: `View the current price, order limits and support options for ${result.service.name}. Available to eligible customers in Nigeria and across Africa.`, alternates: { canonical: `/services/${result.publicId}` }, robots: { index: result.seoEligible, follow: true }, openGraph: { title: result.service.name, description: `Compare the price and order requirements for this ${result.service.categoryName} service.`, url: `/services/${result.publicId}` } } : { title: "Service not found", robots: { index: false } };
 }
 
 export default async function ServiceDetails({ params }: { params: Promise<{ id: string }> }) {

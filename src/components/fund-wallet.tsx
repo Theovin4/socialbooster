@@ -12,6 +12,7 @@ export function FundWallet() {
     setMessage("");
     try {
       trackAnalyticsEvent("wallet_fund_start", { method: "flutterwave" });
+      trackAnalyticsEvent("add_payment_info", { payment_type: "card_or_bank", currency: "NGN", value: Number(form.get("amount") || 0) });
       const response = await fetch("/api/payments/flutterwave/initialize", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ amount: form.get("amount"), currency: "NGN" }) });
       const data = await response.json();
       if (!response.ok) throw new Error(data.error || "Payment could not start");

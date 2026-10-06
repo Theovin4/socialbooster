@@ -6,7 +6,15 @@ Social Booster is a social media services marketplace operated by Elysium Enterp
 - Home: https://www.socialbooster.net.ng/
 - Services: https://www.socialbooster.net.ng/services
 - Pricing: https://www.socialbooster.net.ng/pricing
+- Payments: https://www.socialbooster.net.ng/payments
+- Cryptocurrency payments: https://www.socialbooster.net.ng/payments/crypto
+- Reseller tools: https://www.socialbooster.net.ng/resellers
 - API documentation: https://www.socialbooster.net.ng/api-docs
+- Instagram services: https://www.socialbooster.net.ng/instagram
+- TikTok services: https://www.socialbooster.net.ng/tiktok
+- Facebook services: https://www.socialbooster.net.ng/facebook
+- YouTube services: https://www.socialbooster.net.ng/youtube
+- Telegram services: https://www.socialbooster.net.ng/telegram
 - Marketing guides: https://www.socialbooster.net.ng/blog
 - Africa availability: https://www.socialbooster.net.ng/africa
 - How it works: https://www.socialbooster.net.ng/how-it-works
@@ -20,6 +28,9 @@ Social Booster is a social media services marketplace operated by Elysium Enterp
 
 ## API
 The public Social Booster API v2 documentation explains authentication, service listing, wallet balances, retry-safe order submission and status tracking. API keys are created only inside an authenticated customer account and must remain private.
+
+## Payments
+Customers can use the payment methods displayed in their authenticated wallet. Supported cryptocurrency options include BTC and USDT on the listed networks. Availability, verification requirements and processing times are explained on the public payment pages.
 
 ## Contact
 Official support email: support@socialbooster.net.ng

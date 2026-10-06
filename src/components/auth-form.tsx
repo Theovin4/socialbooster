@@ -37,7 +37,10 @@ export function AuthForm({ mode, initialNotice, returnTo }: { mode: "login" | "r
     const response = await fetch("/api/auth/session", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ idToken: await user.getIdToken(true) }) });
     if (!response.ok) { console.error("[auth] session endpoint rejected sign-in", { status: response.status }); throw new Error("SESSION_FAILED"); }
     const session = await response.json() as { admin?: boolean };
-    if (mode === "register") trackAnalyticsEvent("register_complete", { method: "google" });
+    if (mode === "register") {
+      trackAnalyticsEvent("register_complete", { method: "google" });
+      trackAnalyticsEvent("sign_up", { method: "google" });
+    } else if (mode === "login") trackAnalyticsEvent("login", { method: "google" });
     await firebaseAuth().signOut();
     router.push(destination(session.admin)); router.refresh();
   }, [destination, mode, router]);
@@ -96,6 +99,7 @@ export function AuthForm({ mode, initialNotice, returnTo }: { mode: "login" | "r
         const response = await fetch("/api/auth/session", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ idToken }) });
         if (!response.ok) throw new Error("SESSION_FAILED");
         trackAnalyticsEvent("register_complete", { method: "email" });
+        trackAnalyticsEvent("sign_up", { method: "email" });
         await auth.signOut(); router.push("/dashboard?notice=account-created"); router.refresh(); return;
       }
       const credential = await signInWithEmailAndPassword(auth, email, password);
@@ -103,8 +107,9 @@ export function AuthForm({ mode, initialNotice, returnTo }: { mode: "login" | "r
         try { const branded = await fetch("/api/auth/email", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ type: "verification", email, idToken: await credential.user.getIdToken(true) }) }); if (!branded.ok) await sendEmailVerification(credential.user, actionSettings); }
         catch { await sendEmailVerification(credential.user, actionSettings).catch(() => undefined); }
       }
+      trackAnalyticsEvent("login", { method: "email" });
       await establishSession(credential.user);
-    } catch (error) { setNotice(error instanceof Error && error.message === "FULL_NAME_REQUIRED" ? { kind: "error", title: "Full name required", message: "Enter both your first name and last name." } : messageFor(error, mode)); setBusy(false); }
+    } catch (error) { if (mode === "register") trackAnalyticsEvent("registration_error", { method: "email" }); setNotice(error instanceof Error && error.message === "FULL_NAME_REQUIRED" ? { kind: "error", title: "Full name required", message: "Enter both your first name and last name." } : messageFor(error, mode)); setBusy(false); }
   }
   return <>{notice ? <Toast {...notice} onClose={() => setNotice(undefined)} /> : null}<form onSubmit={submit} style={{ display: "grid", gap: 14, marginTop: 28 }}>
     {mode === "register" ? <div className="form-grid"><label>First name<input className="field" name="firstName" autoComplete="given-name" minLength={2} maxLength={40} pattern=".*\S.*" required /></label><label>Last name<input className="field" name="lastName" autoComplete="family-name" minLength={2} maxLength={40} pattern=".*\S.*" required /></label></div> : null}

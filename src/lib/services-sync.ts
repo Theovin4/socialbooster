@@ -5,12 +5,15 @@ import { configuredUsdToNgnRateMicros, convertMinor } from "./currency";
 import { DEFAULT_GROSS_MARGIN_BPS, decimalToMinor, grossMarginBps, markupBps, sellingPriceForGrossMarginMinor } from "./money";
 import { providerDefinitions, providerServiceDocumentId, type ProviderDefinition } from "./providers";
 import { evaluateServiceQuality } from "./service-quality";
+import { publicServiceId } from "./service-public-id";
+import { writePublicCatalogSnapshot, type PublicCatalogSnapshotItem } from "./public-catalog-snapshot";
 
 export async function synchronizeProviderServices(providerKey: ProviderDefinition["key"]) {
   const provider = providerDefinitions().find((item) => item.key === providerKey);
   if (!provider?.configured) throw new Error(`${provider?.label || providerKey} is not configured`);
   const startedAt = Date.now();
   const [rows, balance] = await Promise.all([provider.client.services(), provider.client.balance()]);
+  if (rows.length > 20_000) console.warn("[services:sync] unusually large catalogue", { provider: providerKey, serviceCount: rows.length });
   const reportedCurrency = String(balance.currency || provider.currency).trim().toUpperCase();
   if (reportedCurrency !== "NGN" && reportedCurrency !== "USD") throw new Error(`${provider.label} returned an unsupported account currency`);
   const providerCurrency: "NGN" | "USD" = reportedCurrency;
@@ -38,6 +41,7 @@ export async function synchronizeProviderServices(providerKey: ProviderDefinitio
   const grossMarginTargetBps = DEFAULT_GROSS_MARGIN_BPS, usdToNgn = configuredUsdToNgnRateMicros();
   let changed = 0, repriced = 0;
   const incomingIds = new Set<string>();
+  const publicSnapshot: PublicCatalogSnapshotItem[] = [];
 
   for (const item of rows) {
     const id = providerServiceDocumentId(provider.key, item.service);
@@ -55,7 +59,45 @@ export async function synchronizeProviderServices(providerKey: ProviderDefinitio
     const quality = evaluateServiceQuality({ name: item.name, category: item.category, min: item.min, max: item.max, rateMinor: providerRateNgnMinor, providerFunded });
     const visibilityOverride = existing?.visibilityOverride === "show" || existing?.visibilityOverride === "hide" ? existing.visibilityOverride : null;
     const active = visibilityOverride === "show" ? providerFunded : visibilityOverride === "hide" ? false : quality.publicEligible;
-    const customerData = { ...providerData, categoryName: quality.normalizedCategory, publicEligibility: quality.publicEligible ? "eligible" : "hidden", hiddenReasons: quality.hiddenReasons };
+    const publicName = typeof existing?.publicNameOverride === "string" && existing.publicNameOverride.trim()
+      ? existing.publicNameOverride.trim().slice(0, 140)
+      : quality.publicName;
+    const publicStatus = existing?.publicStatus === "hidden" || existing?.publicStatus === "review"
+      ? existing.publicStatus
+      : active ? "published" : "hidden";
+    const customerData = {
+      ...providerData,
+      rawName: item.name,
+      publicName,
+      categoryName: quality.normalizedCategory,
+      publicStatus,
+      publicEligibility: quality.publicEligible ? "eligible" : "hidden",
+      hiddenReasons: quality.hiddenReasons,
+      featured: existing?.featured === true,
+      flaggedForReview: existing?.flaggedForReview === true,
+      paidAdsEligible: existing?.paidAdsEligible === true,
+      // Service pages stay noindex until an administrator intentionally
+      // approves enough unique customer value for search visibility.
+      seoEligible: existing?.seoEligibilityOverride === "index",
+    };
+    if (quality.publicEligible) publicSnapshot.push({
+      id: publicServiceId(id),
+      internalId: id,
+      name: publicName,
+      category: quality.normalizedCategory,
+      type: item.type,
+      description: "",
+      min: item.min,
+      max: item.max,
+      refill: item.refill,
+      cancel: item.cancel,
+      rateMinor: Number(sellingRateMinor),
+      updatedAt: new Date().toISOString(),
+      seoEligible: existing?.seoEligibilityOverride === "index",
+      featured: existing?.featured === true,
+      paidAdsEligible: existing?.paidAdsEligible === true,
+      active,
+    });
     const pricingFingerprint = createHash("sha256").update(JSON.stringify({ ...customerData, providerRateNgnMinor: String(providerRateNgnMinor), grossMarginTargetBps: Number(grossMarginTargetBps), active })).digest("hex");
     // Backup catalogues are safe to synchronize while unfunded, but their
     // services must not accept customer orders until the account has funds.
@@ -78,7 +120,8 @@ export async function synchronizeProviderServices(providerKey: ProviderDefinitio
     changed += 1;
   }
   await writer.close();
-  const result = { provider: provider.key, providerCurrency, providerBalance: balance.balance, providerFunded, serviceCount: rows.length, changedCount: changed, repricedCount: repriced, durationMs: Date.now() - startedAt };
+  const publicCatalogSnapshot = await writePublicCatalogSnapshot(provider.key, publicSnapshot);
+  const result = { provider: provider.key, providerCurrency, providerBalance: balance.balance, providerFunded, serviceCount: rows.length, publicServiceCount: publicSnapshot.length, publicCatalogSnapshot, changedCount: changed, repricedCount: repriced, durationMs: Date.now() - startedAt };
   await syncStateRef.set({ ...result, status: "completed", ...(migrateLegacyNumericServices ? { legacyNumericMigrationVersion: 1 } : {}), completedAt: FieldValue.serverTimestamp() }, { merge: true });
   console.info("[services:sync] completed", result);
   return result;

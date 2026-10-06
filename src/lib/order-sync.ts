@@ -7,6 +7,7 @@ import { verifiedProviderStatus } from "./order-status";
 import { sendUserEmail } from "./email";
 import { orderStatusEmailCopy, shouldSendOrderStatusEmail } from "./order-email-policy";
 import { terminalRefundDecision } from "./order-refund-policy";
+import { recordCompletedOrderMarketing } from "./marketing-profile";
 
 const STALE_AFTER_MS = 60_000;
 
@@ -70,6 +71,7 @@ export async function synchronizeOrderDocuments(documents: DocumentSnapshot[], f
         const copy = orderStatusEmailCopy(status, doc.id.slice(0, 8));
         await sendUserEmail(String(doc.get("userId")), { ...copy, buttonLabel: "View order", buttonUrl: `${process.env.NEXT_PUBLIC_APP_URL || "https://www.socialbooster.net.ng"}/dashboard/orders/${doc.id}` }).then(() => doc.ref.set({ ...(status === "completed" ? { customerRoutineEmailCount: FieldValue.increment(1) } : {}), lastCustomerEmailStatus: status, lastCustomerEmailAt: FieldValue.serverTimestamp() }, { merge: true })).catch((error) => console.warn("[order-email] delivery failed", { orderId: doc.id, error: error instanceof Error ? error.message : "Unknown error" }));
       }
+      if (status === "completed") await recordCompletedOrderMarketing(doc.id).catch((error) => console.warn("[order-marketing-profile] completion update failed", { orderId: doc.id, error: error instanceof Error ? error.message : "Unknown error" }));
     }
     if (["stage", "reject"].includes(refundDecision)) await db.collection("auditLogs").add({ action: refundDecision === "stage" ? "order_refund_staged" : "order_refund_evidence_rejected", targetType: "order", targetId: doc.id, providerKey, providerOrderId: doc.get("providerOrderId"), candidateStatus, startCount, remains, quantity, createdAt: FieldValue.serverTimestamp() });
     if (refundDecision === "confirm") {

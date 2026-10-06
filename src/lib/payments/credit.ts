@@ -3,6 +3,7 @@ import { migrateLegacyUsdWalletToNgn, postWallet } from "@/lib/firebase/wallet";
 import { decimalToMinor } from "@/lib/money";
 import { verifyFlutterwaveTransaction, verifyFlutterwaveTransactionByReference } from "./flutterwave";
 import { sendUserEmail } from "@/lib/email";
+import { recordFundingMarketing } from "@/lib/marketing-profile";
 
 export async function creditVerifiedPayment(input: { provider: "flutterwave" | "paypal"; reference: string; providerTransactionId: string; amountMinor: number; currency: string }) {
   const db = adminDb(), intentRef = db.collection("paymentIntents").doc(input.reference), intent = await intentRef.get();
@@ -15,6 +16,7 @@ export async function creditVerifiedPayment(input: { provider: "flutterwave" | "
   }
   const posted = await postWallet({ userId: expected.userId, type: "deposit", deltaMinor: expected.amountMinor, currency: expected.currency, idempotencyKey: `${input.provider}:${input.providerTransactionId}`, reference: input.reference });
   await intentRef.set({ status: "paid", providerTransactionId: input.providerTransactionId, verifiedAt: new Date() }, { merge: true });
+  if (!posted.duplicate) await recordFundingMarketing(String(expected.userId), input.provider === "flutterwave" ? "card" : "bank_transfer").catch((error) => console.warn("[payment-marketing-profile] update failed", { reference: input.reference, error: error instanceof Error ? error.message : "Unknown error" }));
   if (!posted.duplicate && process.env.RESEND_API_KEY && process.env.EMAIL_FROM) await sendUserEmail(String(expected.userId), { subject: "Your Social Booster wallet has been funded", title: "Payment confirmed", message: `Your verified ${expected.currency} ${(Number(expected.amountMinor) / 100).toLocaleString("en-NG", { minimumFractionDigits: 2 })} payment has been added to your wallet.`, buttonLabel: "View wallet", buttonUrl: `${process.env.NEXT_PUBLIC_APP_URL || "https://www.socialbooster.net.ng"}/dashboard/wallet` }).catch((error) => console.warn("[payment-email] delivery failed", { reference: input.reference, error: error instanceof Error ? error.message : "Unknown error" }));
   return expected;
 }

@@ -11,10 +11,10 @@ export const metadata: Metadata = {
 };
 
 const platforms = [
-  { name: "Instagram", href: "/blog/instagram-marketing-nigeria" },
-  { name: "TikTok", href: "/blog/tiktok-growth-nigeria" },
-  { name: "YouTube", href: "/blog/youtube-marketing-nigeria" },
-  { name: "Facebook", href: "/blog/facebook-marketing-nigeria" },
+  { name: "Instagram", href: "/instagram" },
+  { name: "TikTok", href: "/tiktok" },
+  { name: "YouTube", href: "/youtube" },
+  { name: "Facebook", href: "/facebook" },
   { name: "X / Twitter", href: "/blog/x-twitter-marketing-nigeria" },
   { name: "WhatsApp", href: "/blog/whatsapp-business-marketing-nigeria" },
 ];

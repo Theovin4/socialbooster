@@ -7,6 +7,9 @@ import { requireAdmin } from "@/lib/firebase/session";
 import { DEFAULT_GROSS_MARGIN_BPS, decimalToMinor, grossMarginBps, markupBps, sellingPriceForGrossMarginMinor } from "@/lib/money";
 import { isProviderKey } from "@/lib/providers";
 import { synchronizeProviderServices } from "@/lib/services-sync";
+import { evaluateServiceQuality } from "@/lib/service-quality";
+import { patchPublicCatalogSnapshotService } from "@/lib/public-catalog-snapshot";
+import { normalizeProviderKey } from "@/lib/providers";
 
 const refresh = () => { revalidateTag("active-service-catalog", "max"); revalidatePath("/admin/services"); revalidatePath("/services"); };
 const validServiceId = (id: string) => /^(?:\d+|followspanel_[A-Za-z0-9][A-Za-z0-9_-]{2,127}|(?:nitro|smmworld)_\d+)$/.test(id);
@@ -41,14 +44,46 @@ export async function approveService(formData: FormData) {
   if (!provider.exists) throw new Error("Provider service not found");
   const data = provider.data()!, providerRateMinor = BigInt(data.providerRateNgnMinor ?? decimalToMinor(String(data.rateText))), grossMarginTargetBps = DEFAULT_GROSS_MARGIN_BPS;
   const sellingRateMinor = sellingPriceForGrossMarginMinor(providerRateMinor, grossMarginTargetBps);
-  await db.collection("services").doc(id).set({ providerKey: data.providerKey || "followspanel", providerLabel: data.providerLabel || "Followpanel", providerServiceId: data.providerServiceId, name: data.name, categoryName: data.categoryName, type: data.type, minQuantity: data.minQuantity, maxQuantity: data.maxQuantity, refillSupported: data.refillSupported, cancelSupported: data.cancelSupported, providerCurrency: data.providerCurrency || "NGN", sellingCurrency: "NGN", providerRateMinor: Number(providerRateMinor), providerRateNgnMinor: Number(providerRateMinor), sellingRateMinor: Number(sellingRateMinor), pricingModel: "ngn_gross_margin_v2", grossMarginTargetBps: Number(grossMarginTargetBps), markupBps: Number(markupBps(providerRateMinor, sellingRateMinor)), grossMarginBps: Number(grossMarginBps(providerRateMinor, sellingRateMinor)), marginBps: FieldValue.delete(), customSellingRateMinor: FieldValue.delete(), active: true, visibilityOverride: "show", approvedBy: admin.uid, approvedAt: FieldValue.serverTimestamp(), updatedAt: FieldValue.serverTimestamp() }, { merge: true });
+  const quality = evaluateServiceQuality({ name: String(data.name || ""), category: String(data.categoryName || "Other"), min: Number(data.minQuantity), max: Number(data.maxQuantity), rateMinor: providerRateMinor, providerFunded: true });
+  await db.collection("services").doc(id).set({ providerKey: data.providerKey || "followspanel", providerLabel: data.providerLabel || "Followpanel", providerServiceId: data.providerServiceId, name: data.name, rawName: data.name, publicName: quality.publicName, categoryName: quality.normalizedCategory, type: data.type, minQuantity: data.minQuantity, maxQuantity: data.maxQuantity, refillSupported: data.refillSupported, cancelSupported: data.cancelSupported, providerCurrency: data.providerCurrency || "NGN", sellingCurrency: "NGN", providerRateMinor: Number(providerRateMinor), providerRateNgnMinor: Number(providerRateMinor), sellingRateMinor: Number(sellingRateMinor), pricingModel: "ngn_gross_margin_v2", grossMarginTargetBps: Number(grossMarginTargetBps), markupBps: Number(markupBps(providerRateMinor, sellingRateMinor)), grossMarginBps: Number(grossMarginBps(providerRateMinor, sellingRateMinor)), marginBps: FieldValue.delete(), customSellingRateMinor: FieldValue.delete(), active: true, publicStatus: "published", visibilityOverride: "show", featured: false, flaggedForReview: false, paidAdsEligible: false, seoEligible: false, approvedBy: admin.uid, approvedAt: FieldValue.serverTimestamp(), updatedAt: FieldValue.serverTimestamp() }, { merge: true });
   refresh();
 }
 
 export async function setServiceActive(formData: FormData) {
   const admin = await requireAdmin(), id = String(formData.get("id") || ""), active = String(formData.get("active")) === "true";
   if (!validServiceId(id)) throw new Error("Invalid service ID");
-  await adminDb().collection("services").doc(id).set({ active, visibilityOverride: active ? "show" : "hide", updatedBy: admin.uid, updatedAt: FieldValue.serverTimestamp() }, { merge: true });
+  await adminDb().collection("services").doc(id).set({ active, publicStatus: active ? "published" : "hidden", visibilityOverride: active ? "show" : "hide", ...(active ? {} : { seoEligible: false }), updatedBy: admin.uid, updatedAt: FieldValue.serverTimestamp() }, { merge: true });
+  refresh();
+}
+
+const governanceOperations = new Set(["publish", "unpublish", "feature", "unfeature", "flag", "clear_flag", "seo_on", "seo_off", "ads_on", "ads_off"]);
+
+export async function setServiceGovernance(formData: FormData) {
+  const admin = await requireAdmin();
+  const id = String(formData.get("id") || "");
+  const operation = String(formData.get("operation") || "");
+  if (!validServiceId(id) || !governanceOperations.has(operation)) throw new Error("Invalid governance change");
+  const ref = adminDb().collection("services").doc(id);
+  const snapshot = await ref.get();
+  if (!snapshot.exists) throw new Error("Service not found");
+  const changes: Record<string, unknown> = { updatedBy: admin.uid, updatedAt: FieldValue.serverTimestamp() };
+  if (operation === "publish") Object.assign(changes, { active: true, publicStatus: "published", visibilityOverride: "show" });
+  if (operation === "unpublish") Object.assign(changes, { active: false, publicStatus: "hidden", visibilityOverride: "hide", seoEligible: false });
+  if (operation === "feature" || operation === "unfeature") changes.featured = operation === "feature";
+  if (operation === "flag" || operation === "clear_flag") Object.assign(changes, { flaggedForReview: operation === "flag", publicStatus: operation === "flag" ? "review" : snapshot.get("active") === true ? "published" : "hidden" });
+  if (operation === "seo_on" || operation === "seo_off") Object.assign(changes, { seoEligibilityOverride: operation === "seo_on" ? "index" : "noindex", seoEligible: operation === "seo_on" });
+  if (operation === "ads_on" || operation === "ads_off") changes.paidAdsEligible = operation === "ads_on";
+  const batch = adminDb().batch();
+  batch.set(ref, changes, { merge: true });
+  batch.create(adminDb().collection("auditLogs").doc(), { action: `service_governance_${operation}`, targetType: "service", targetId: id, actorUid: admin.uid, createdAt: FieldValue.serverTimestamp() });
+  await batch.commit();
+  const providerKey = normalizeProviderKey(snapshot.get("providerKey"));
+  const snapshotChanges: { active?: boolean; featured?: boolean; seoEligible?: boolean; paidAdsEligible?: boolean } = {};
+  if (operation === "publish" || operation === "unpublish") snapshotChanges.active = operation === "publish";
+  if (operation === "feature" || operation === "unfeature") snapshotChanges.featured = operation === "feature";
+  if (operation === "seo_on" || operation === "seo_off") snapshotChanges.seoEligible = operation === "seo_on";
+  if (operation === "ads_on" || operation === "ads_off") snapshotChanges.paidAdsEligible = operation === "ads_on";
+  if (Object.keys(snapshotChanges).length) await patchPublicCatalogSnapshotService(providerKey, id, snapshotChanges);
   refresh();
 }
 

@@ -56,6 +56,71 @@
         { "fieldPath": "provider", "order": "ASCENDING" },
         { "fieldPath": "status", "order": "ASCENDING" }
       ]
+    },
+    {
+      "collectionGroup": "marketingProfiles",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "marketingEligible", "order": "ASCENDING" },
+        { "fieldPath": "lastOrderAt", "order": "ASCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "marketingProfiles",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "marketingEligible", "order": "ASCENDING" },
+        { "fieldPath": "walletFunded", "order": "ASCENDING" },
+        { "fieldPath": "completedOrderCount", "order": "ASCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "marketingProfiles",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "marketingEligible", "order": "ASCENDING" },
+        { "fieldPath": "completedOrderCount", "order": "ASCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "marketingProfiles",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "marketingEligible", "order": "ASCENDING" },
+        { "fieldPath": "lifetimeOrderValueMinor", "order": "ASCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "marketingProfiles",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "marketingEligible", "order": "ASCENDING" },
+        { "fieldPath": "resellerOrApi", "order": "ASCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "marketingProfiles",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "marketingEligible", "order": "ASCENDING" },
+        { "fieldPath": "hasUsedCrypto", "order": "ASCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "marketingCampaigns",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "status", "order": "ASCENDING" },
+        { "fieldPath": "createdAt", "order": "DESCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "marketingCampaigns",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "status", "order": "ASCENDING" },
+        { "fieldPath": "scheduledAt", "order": "ASCENDING" }
+      ]
     }
   ],
   "fieldOverrides": []

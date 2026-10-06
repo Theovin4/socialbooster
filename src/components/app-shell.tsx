@@ -3,7 +3,7 @@
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { useState } from "react";
-import { Activity, BadgeDollarSign, Bitcoin, Braces, ChartNoAxesCombined, ClipboardList, Headphones, Home, Layers3, LogOut, Menu, PlusCircle, ReceiptText, RefreshCcw, ShieldCheck, WalletCards, X } from "lucide-react";
+import { Activity, BadgeDollarSign, Bitcoin, Braces, ChartNoAxesCombined, ClipboardList, Gauge, Headphones, Home, Layers3, LogOut, Mail, Menu, PlusCircle, ReceiptText, RefreshCcw, SearchCheck, Settings, ShieldCheck, WalletCards, X } from "lucide-react";
 import { Logo } from "./logo";
 
 const customerLinks = [
@@ -16,6 +16,7 @@ const customerLinks = [
   { label: "Refills", href: "/dashboard/refills", icon: RefreshCcw },
   { label: "Support", href: "/dashboard/support", icon: Headphones },
   { label: "API", href: "/dashboard/api", icon: Braces },
+  { label: "Email preferences", href: "/dashboard/preferences", icon: Settings },
 ];
 
 const adminLinks = [
@@ -27,6 +28,9 @@ const adminLinks = [
   { label: "Crypto payments", href: "/admin/crypto", icon: Bitcoin },
   { label: "Support", href: "/admin/support", icon: Headphones },
   { label: "Live orders", href: "/admin/provider", icon: Activity },
+  { label: "Cost report", href: "/admin/operations", icon: Gauge },
+  { label: "Search health", href: "/admin/seo", icon: SearchCheck },
+  { label: "Email marketing", href: "/admin/email-marketing", icon: Mail },
 ];
 
 export function AppShell({ admin = false, children }: { admin?: boolean; children: React.ReactNode }) {

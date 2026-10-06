@@ -3,6 +3,7 @@ import type { DecodedIdToken } from "firebase-admin/auth";
 import { FieldValue } from "firebase-admin/firestore";
 import { adminDb } from "./admin";
 import { recordNewCustomer, totalsDocument } from "./stats";
+import { createMarketingProfileInTransaction } from "../marketing-profile";
 
 export async function ensureApplicationUser(token: DecodedIdToken) {
   const db = adminDb(), userRef = db.collection("users").doc(token.uid), walletRef = db.collection("wallets").doc(token.uid), statsRef = totalsDocument();
@@ -30,8 +31,12 @@ export async function ensureApplicationUser(token: DecodedIdToken) {
         lastLoginAt: FieldValue.serverTimestamp(),
       });
       if (totals) recordNewCustomer(transaction, totals);
+      createMarketingProfileInTransaction(transaction, token, true);
     }
-    else transaction.set(userRef, { emailVerified: token.email_verified === true, lastLoginAt: FieldValue.serverTimestamp(), updatedAt: FieldValue.serverTimestamp() }, { merge: true });
+    else {
+      transaction.set(userRef, { emailVerified: token.email_verified === true, lastLoginAt: FieldValue.serverTimestamp(), updatedAt: FieldValue.serverTimestamp() }, { merge: true });
+      createMarketingProfileInTransaction(transaction, token, false);
+    }
     if (!wallet.exists) transaction.create(walletRef, { userId: token.uid, currency: "NGN", availableMinor: 0, reservedMinor: 0, balanceMinor: 0, version: 1, createdAt: FieldValue.serverTimestamp(), updatedAt: FieldValue.serverTimestamp() });
     return !profile.exists;
   });

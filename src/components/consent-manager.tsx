@@ -34,9 +34,16 @@ export function ConsentManager() {
   useEffect(() => {
     if (!consent?.analytics) return;
     const query = new URLSearchParams(window.location.search);
-    if (pathname === "/dashboard/wallet" && query.get("payment") === "success") trackAnalyticsEvent("wallet_fund_success", { method: "flutterwave" });
+    if (pathname === "/dashboard/wallet" && query.get("payment") === "success") {
+      trackAnalyticsEvent("wallet_fund_success", { method: "flutterwave" });
+      query.delete("payment");
+      window.history.replaceState({}, "", `${pathname}${query.size ? `?${query.toString()}` : ""}`);
+    }
     const detail = pathname.match(/^\/services\/([^/]+)$/);
-    if (detail) trackAnalyticsEvent("service_view", { service_id: detail[1], surface: "service_detail" });
+    if (detail) {
+      trackAnalyticsEvent("service_view", { service_id: detail[1], surface: "service_detail" });
+      trackAnalyticsEvent("view_item", { items: [{ item_id: detail[1] }] });
+    }
   }, [consent?.analytics, pathname]);
   function save(next: Consent) {
     window.localStorage.setItem(storageKey, JSON.stringify(next));

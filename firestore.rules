@@ -24,6 +24,11 @@ service cloud.firestore {
     match /services/{id} { allow read: if true; allow write: if false; }
     match /serviceCategories/{id} { allow read: if true; allow write: if false; }
     match /blogPosts/{id} { allow read: if resource.data.status == "published" || admin(); allow write: if false; }
+    match /marketingProfiles/{id} { allow read, write: if false; }
+    match /adminAuditLogs/{id} { allow read, write: if false; }
+    match /marketingCampaigns/{id} { allow read, write: if false; }
+    match /marketingStats/{id} { allow read, write: if false; }
+    match /resendWebhookEvents/{id} { allow read, write: if false; }
     match /{document=**} { allow read, write: if false; }
   }
 }

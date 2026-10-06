@@ -8,6 +8,11 @@ export const metadata: Metadata = {
   title: "Social Media Marketing Guides for Nigeria",
   description: "Explore practical Instagram, TikTok, Facebook, YouTube, SEO and digital marketing guides for Nigerian creators and businesses.",
   alternates: { canonical: "/blog" },
+  openGraph: {
+    title: "Social Media Marketing Guides for Nigeria",
+    description: "Practical social media, SEO and digital marketing guidance for Nigerian creators and businesses.",
+    url: "/blog",
+  },
 };
 
 export default function BlogPage() {
