@@ -19,7 +19,7 @@ export async function syncAllServices(formData: FormData) {
   const provider = String(formData.get("provider") || "followspanel");
   if (!isProviderKey(provider)) throw new Error("Invalid provider");
   let outcome = "success";
-  try { await synchronizeProviderServices(provider); }
+  try { await synchronizeProviderServices(provider, { trigger: "manual" }); }
   catch (error) {
     const message = error instanceof Error ? error.message : String(error);
     console.error("[admin:services-sync] failed", { provider, error: message, stack: error instanceof Error ? error.stack : undefined });

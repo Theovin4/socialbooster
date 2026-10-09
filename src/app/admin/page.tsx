@@ -1,5 +1,4 @@
 import Link from "next/link";
-import { AggregateField } from "firebase-admin/firestore";
 import { unstable_cache } from "next/cache";
 import { AppShell } from "@/components/app-shell";
 import { Toast } from "@/components/toast";
@@ -8,9 +7,10 @@ import { getOperationalTotals, lagosDateKey, type OperationalTotals } from "@/li
 import { requireAdmin } from "@/lib/firebase/session";
 import { formatMoney } from "@/lib/money";
 import { sendActivationRecovery } from "./actions";
+import { ensureFinanceRollups, loadCustomerGrowthDays } from "@/lib/firebase/analytics-rollups";
 
 export const dynamic = "force-dynamic";
-export const maxDuration = 300;
+export const maxDuration = 60;
 
 const periods = { "7": "Last 7 days", "30": "Last 30 days", "90": "Last 90 days", "365": "Last 12 months", all: "All time" } as const;
 type Period = keyof typeof periods;
@@ -54,27 +54,28 @@ function customerGrowth(totals: OperationalTotals, period: Period): Growth {
 
 async function aggregateDashboardMetrics() {
   const db = adminDb();
-  const attentionStatuses = ["pending", "processing", "in_progress", "submitting", "provider_confirmation_required", "cancel_requested"];
-  const results = await Promise.allSettled([
-    db.collection("services").where("active", "==", true).count().get(),
-    db.collection("orders").where("status", "in", attentionStatuses).count().get(),
-    db.collection("wallets").where("currency", "==", "NGN").aggregate({ total: AggregateField.sum("availableMinor") }).get(),
-    db.collection("walletTransactions").where("type", "==", "deposit").aggregate({ total: AggregateField.sum("deltaMinor") }).get(),
-  ]);
-  const failed: string[] = [];
-  const read = <T,>(index: number, label: string, value: (snapshot: never) => T): T | null => {
-    const result = results[index];
-    if (result.status === "fulfilled") return value(result.value as never);
-    failed.push(label);
-    console.error("[admin-dashboard] aggregate unavailable", { metric: label, error: result.reason instanceof Error ? result.reason.message : "Unknown error" });
-    return null;
-  };
+  let [analytics, ...providers] = await db.getAll(
+    db.collection("analytics").doc("global"),
+    db.collection("providerSyncState").doc("followspanel"),
+    db.collection("providerSyncState").doc("nitro"),
+    db.collection("providerSyncState").doc("smmworld"),
+  );
+  if (!analytics.exists) {
+    await ensureFinanceRollups();
+    [analytics, ...providers] = await db.getAll(
+      db.collection("analytics").doc("global"),
+      db.collection("providerSyncState").doc("followspanel"),
+      db.collection("providerSyncState").doc("nitro"),
+      db.collection("providerSyncState").doc("smmworld"),
+    );
+  }
+  const activeServices = providers.reduce((sum, item) => sum + Number(item.get("publicServiceCount") || 0), 0);
   return {
-    activeServices: read(0, "active services", (snapshot: { data(): { count?: number } }) => Number(snapshot.data().count || 0)),
-    pending: read(1, "orders requiring attention", (snapshot: { data(): { count?: number } }) => Number(snapshot.data().count || 0)),
-    walletMinor: read(2, "customer wallet balance", (snapshot: { data(): { total?: number } }) => Number(snapshot.data().total || 0)),
-    depositsMinor: read(3, "verified deposits", (snapshot: { data(): { total?: number } }) => Number(snapshot.data().total || 0)),
-    failed,
+    activeServices,
+    pending: Number(analytics.get("activeOrders") || 0),
+    walletMinor: Number(analytics.get("walletLiabilityMinor") || 0),
+    depositsMinor: Number(analytics.get("depositsMinor") || 0),
+    failed: analytics.exists ? [] : ["finance rollup"],
   };
 }
 
@@ -92,7 +93,12 @@ export default async function Admin({ searchParams }: { searchParams: Promise<{ 
   const totals = results[0].status === "fulfilled" ? results[0].value : null;
   const metrics = results[1].status === "fulfilled" ? results[1].value : null;
   if (metrics?.failed.length) dataAvailable = false;
-  const customers = totals ? customerGrowth(totals, period) : null;
+  let customers: Growth | null = null;
+  if (totals) {
+    const today = dateFromKey(totals.todayKey), days = period === "all" ? 365 : Number(period);
+    const daily = await loadCustomerGrowthDays(keyForOffset(today, Math.min(369, days * 2 - 1)), totals.todayKey).catch(() => ({}));
+    customers = customerGrowth({ ...totals, dailyCustomerJoins: { ...totals.dailyCustomerJoins, ...daily } }, period);
+  }
   const unavailable = "Unavailable";
   const cards = [
     ["Total customers", customers?.total.toLocaleString("en-NG") ?? unavailable],

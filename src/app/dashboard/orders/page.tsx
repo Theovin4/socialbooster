@@ -6,6 +6,8 @@ import { requireUser } from "@/lib/firebase/session";
 import { formatMoney } from "@/lib/money";
 import { synchronizeOrderDocuments } from "@/lib/order-sync";
 import { customerOrderStatusLabel } from "@/lib/customer-order-status";
+import { decodeTimestampCursor, encodeTimestampCursor } from "@/lib/pagination-cursor";
+import { FieldPath, Timestamp } from "firebase-admin/firestore";
 
 export const dynamic = "force-dynamic";
 const filters = [
@@ -49,17 +51,20 @@ function progress(quantity: unknown, remains: unknown, status: unknown) {
 export default async function OrdersPage({
   searchParams,
 }: {
-  searchParams: Promise<{ status?: string; q?: string; refresh?: string }>;
+  searchParams: Promise<{ status?: string; q?: string; refresh?: string; after?: string }>;
 }) {
   const user = await requireUser();
-  const { status = "all", q = "", refresh } = await searchParams;
+  const { status = "all", q = "", refresh, after } = await searchParams;
   let refreshFailed = false;
-  const query = adminDb().collection("orders").where("userId", "==", user.uid).orderBy("createdAt", "desc").limit(25);
-  let snapshot = await query.get();
+  let query: FirebaseFirestore.Query = adminDb().collection("orders").where("userId", "==", user.uid);
+  if (filters.includes(status) && status !== "all") query = query.where("status", "==", status);
+  query = query.orderBy("createdAt", "desc").orderBy(FieldPath.documentId(), "desc").limit(20);
+  const cursor = decodeTimestampCursor(after);
+  if (cursor) query = query.startAfter(Timestamp.fromMillis(cursor.millis), cursor.id);
+  const snapshot = await query.get();
   if (refresh === "1") {
     try {
       await synchronizeOrderDocuments(snapshot.docs.filter((doc) => Number.isInteger(doc.get("providerOrderId"))), true);
-      snapshot = await query.get();
     } catch (error) {
       refreshFailed = true;
       console.warn("[orders] customer status refresh failed", {
@@ -101,7 +106,7 @@ export default async function OrdersPage({
       <p className="muted page-lead">
         Track start count, remaining quantity and delivery progress.
       </p>
-      {snapshot.size === 25 ? <p className="muted">Showing your 25 most recent orders.</p> : null}
+      {snapshot.size === 20 ? <p className="muted">Showing 20 orders on this page.</p> : null}
       <div className="section-head">
         <div className="order-filters">
           {filters.map((item) => (
@@ -263,6 +268,11 @@ export default async function OrdersPage({
               );
             })}
           </div>
+          {snapshot.size === 20 && snapshot.docs.at(-1)?.get("createdAt")?.toMillis?.() ? (
+            <div style={{ marginTop: 20 }}>
+              <Link className="btn" href={`/dashboard/orders?${new URLSearchParams({ status, ...(q ? { q } : {}), after: encodeTimestampCursor({ millis: snapshot.docs.at(-1)!.get("createdAt").toMillis(), id: snapshot.docs.at(-1)!.id }) }).toString()}`}>Next 20 orders</Link>
+            </div>
+          ) : null}
         </>
       )}
     </AppShell>

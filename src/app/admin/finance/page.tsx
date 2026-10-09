@@ -1,8 +1,7 @@
 import Link from "next/link";
 import { AppShell } from "@/components/app-shell";
 import { requireAdmin } from "@/lib/firebase/session";
-import { financeSummary } from "@/lib/finance";
-import { loadFinanceData } from "@/lib/finance-data";
+import { loadFinanceDashboardData } from "@/lib/finance-data";
 import { formatMoney } from "@/lib/money";
 
 export const dynamic = "force-dynamic";
@@ -33,20 +32,15 @@ export default async function FinancePage({
   const filters = await searchParams,
     range = filters.range || "30d",
     status = filters.status || "all";
-  const data = await loadFinanceData({ ...filters, range, status });
-  const summary = financeSummary(
-    data.orders,
-    data.transactions,
-    data.walletLiabilityMinor,
-  );
-  const ordersAvailable = data.availability.orders;
-  const transactionsAvailable = data.availability.transactions;
-  const walletAvailable = data.availability.wallet;
+  const data = await loadFinanceDashboardData({ ...filters, range, status });
+  const summary = data.summary;
+  const ordersAvailable = true;
+  const transactionsAvailable = true;
+  const walletAvailable = true;
   const byDay = new Map<string, number>();
-  for (const order of data.orders) {
-    if (!order.createdAt) continue;
-    const key = order.createdAt.toISOString().slice(0, 10);
-    byDay.set(key, (byDay.get(key) || 0) + order.customerPriceMinor);
+  for (const row of data.daily) {
+    const key = String(row.dateKey || "");
+    if (key) byDay.set(key, Number(row.orderValueMinor || 0));
   }
   const trend = [...byDay.entries()]
       .sort(([a], [b]) => a.localeCompare(b))
@@ -155,25 +149,7 @@ export default async function FinancePage({
           Reset
         </Link>
       </form>
-      {data.availability.unavailable.length ? (
-        <div className="notice" style={{ marginTop: 18 }}>
-          <strong>Some finance metrics are being refreshed.</strong>
-          <p className="muted" style={{ marginBottom: 0 }}>
-            Available records remain visible. The unavailable section will return automatically; no wallet or payment data was changed.
-          </p>
-        </div>
-      ) : null}
-      {data.truncated ? (
-        <div className="notice" style={{ marginTop: 18 }}>
-          <strong>Quota-safe report view</strong>
-          <p className="muted" style={{ marginBottom: 0 }}>
-            This dashboard is using the latest{" "}
-            {data.limit.toLocaleString("en-NG")} records in the selected period.
-            Choose a shorter date range for complete period totals, or use the
-            downloadable report when you need a larger export.
-          </p>
-        </div>
-      ) : null}
+      <div className="notice" style={{ marginTop: 18 }}><strong>Quota-safe reporting active</strong><p className="muted" style={{ marginBottom: 0 }}>Totals come from compact finance rollups. The table below is limited to the latest 25 matching orders; downloadable reports remain available on demand.</p></div>
       <div className="finance-kpis">
         {cards.map(([label, value]) => (
           <article className="glass card stat-card" key={label}>

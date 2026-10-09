@@ -2,6 +2,7 @@ import { FieldValue } from "firebase-admin/firestore";
 import { adminDb } from "./admin";
 import { configuredUsdToNgnRateMicros, convertMinor } from "../currency";
 import { sendAdminAlert } from "../email";
+import { recordWalletRollup } from "./analytics-rollups";
 
 export type LedgerType = "deposit" | "order_debit" | "refund" | "admin_adjustment" | "promotional_credit" | "currency_conversion";
 export type WalletEntry = { userId: string; type: LedgerType; deltaMinor: number; currency: string; idempotencyKey: string; reference?: string; reason?: string; actorUid?: string };
@@ -54,6 +55,7 @@ export async function postWallet(input: WalletEntry) {
     transaction.create(transactionRef, { ...input, balanceBeforeMinor: current, balanceAfterMinor: next, status: "posted", createdAt: FieldValue.serverTimestamp() });
     transaction.create(ledgerRef, { walletUserId: input.userId, transactionId: transactionRef.id, type: input.type, deltaMinor: input.deltaMinor, currency, balanceBeforeMinor: current, balanceAfterMinor: next, reference: input.reference || null, reason: input.reason || null, actorUid: input.actorUid || null, createdAt: FieldValue.serverTimestamp() });
     if (input.type === "admin_adjustment" || input.type === "refund") transaction.create(auditRef, { action: input.type === "refund" ? "wallet_refund_posted" : "wallet_admin_adjustment", targetType: "wallet", targetId: input.userId, transactionId: transactionRef.id, reference: input.reference || null, deltaMinor: input.deltaMinor, currency, reason: input.reason, actorUid: input.actorUid || null, createdAt: FieldValue.serverTimestamp() });
+    recordWalletRollup(transaction, { type: input.type, deltaMinor: input.deltaMinor, currency });
     return { transactionId: transactionRef.id, duplicate: false };
   });
   if (!result.duplicate && input.deltaMinor > 0) await sendAdminAlert({ subject: `Wallet credit: ${input.currency} ${(input.deltaMinor / 100).toLocaleString("en-NG", { minimumFractionDigits: 2 })}`, title: "Customer wallet credited", message: `A ${input.type.replaceAll("_", " ")} of ${input.currency} ${(input.deltaMinor / 100).toLocaleString("en-NG", { minimumFractionDigits: 2 })} was posted for customer ${input.userId}. Reference: ${input.reference || result.transactionId}.`, buttonLabel: "View transactions", buttonUrl: `${process.env.NEXT_PUBLIC_APP_URL || "https://www.socialbooster.net.ng"}/admin/transactions` }).catch((error) => console.warn("[admin-credit-email] delivery failed", { transactionId: result.transactionId, error: error instanceof Error ? error.message : "Unknown error" }));

@@ -9,6 +9,7 @@ import {
   type FinanceOrder,
   type FinanceTransaction,
 } from "./finance";
+import { loadFinanceRollups } from "./firebase/analytics-rollups";
 
 const DASHBOARD_RECORD_LIMIT = 200;
 const MAX_RECORD_LIMIT = 1_000;
@@ -20,6 +21,38 @@ function date(value: unknown) {
 function boundedLimit(value?: number) {
   if (!Number.isFinite(value)) return DASHBOARD_RECORD_LIMIT;
   return Math.max(1, Math.min(MAX_RECORD_LIMIT, Math.floor(value || 0)));
+}
+
+/** Quota-safe admin dashboard loader. It reads rollups plus at most 25 recent
+ * orders; the larger loader below remains available only for explicit exports. */
+export async function loadFinanceDashboardData(filters: { range?: string; from?: string; to?: string; status?: string }) {
+  const db = adminDb(), period = financePeriod(filters), rollups = await loadFinanceRollups(period);
+  let query: Query = db.collection("orders");
+  if (period.start) query = query.where("createdAt", ">=", Timestamp.fromDate(period.start));
+  query = query.where("createdAt", "<=", Timestamp.fromDate(period.end));
+  if (filters.status && filters.status !== "all") query = query.where("status", "==", filters.status);
+  const snapshot = await query.orderBy("createdAt", "desc").limit(25).get();
+  const orders: FinanceOrder[] = snapshot.docs.map((doc) => ({
+    id: doc.id, createdAt: date(doc.get("createdAt")), status: String(doc.get("status") || "unknown"),
+    serviceName: String(doc.get("serviceName") || "Unknown service"),
+    category: String(doc.get("categoryName") || doc.get("serviceName") || "Other").split(/[|\[]/)[0].trim(),
+    quantity: Number(doc.get("quantity") || 0), customerPriceMinor: Number(doc.get("customerPriceMinor") || 0),
+    providerCostMinor: Number(doc.get("providerCostMinor") || 0), grossProfitMinor: Number(doc.get("grossProfitMinor") || 0),
+    providerOrderId: doc.get("providerOrderId"),
+  }));
+  const summaryRollup = rollups.summary as Record<string, unknown>;
+  const value = (key: string) => Number(summaryRollup[key] || 0);
+  const orderValueMinor = value("orderValueMinor"), refundsMinor = value("refundsMinor"), netSalesMinor = Math.max(0, orderValueMinor - refundsMinor);
+  const capitalDeployedMinor = value("capitalDeployedMinor"), grossProfitMinor = netSalesMinor - capitalDeployedMinor;
+  return {
+    orders, daily: rollups.daily, period,
+    summary: {
+      depositsMinor: value("depositsMinor"), orderValueMinor, refundsMinor, netSalesMinor, capitalDeployedMinor,
+      activeCapitalMinor: value("activeCapitalMinor"), grossProfitMinor,
+      grossMarginBps: netSalesMinor > 0 ? Math.round(grossProfitMinor * 10_000 / netSalesMinor) : 0,
+      walletLiabilityMinor: value("walletLiabilityMinor"), orderCount: value("orderCount"), completedOrders: value("completedOrders"),
+    },
+  };
 }
 
 export async function loadFinanceData(

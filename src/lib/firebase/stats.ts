@@ -54,16 +54,18 @@ export function recordNewCustomer(
   snapshot: DocumentSnapshot,
 ) {
   const todayKey = lagosDateKey();
-  const dailyCustomerJoins = dailyValues(snapshot.get("dailyCustomerJoins"));
-  dailyCustomerJoins[todayKey] = (dailyCustomerJoins[todayKey] || 0) + 1;
   const sameDay = snapshot.exists && snapshot.get("todayKey") === todayKey;
 
   transaction.set(snapshot.ref, {
     totalCustomers: FieldValue.increment(1),
     joinedToday: sameDay ? FieldValue.increment(1) : 1,
     todayKey,
-    dailyCustomerJoins,
     lastUpdated: FieldValue.serverTimestamp(),
+  }, { merge: true });
+  transaction.set(snapshot.ref.firestore.collection("analyticsDaily").doc(todayKey), {
+    dateKey: todayKey,
+    newCustomers: FieldValue.increment(1),
+    updatedAt: FieldValue.serverTimestamp(),
   }, { merge: true });
 }
 
@@ -104,6 +106,16 @@ export async function reconcileOperationalTotals() {
 
   const orders = await db.collection("orders").count().get();
   const totalOrders = numberValue(orders.data().count);
+  const writer = db.bulkWriter();
+  writer.onWriteError((error) => error.failedAttempts < 3);
+  for (const [dateKey, newCustomers] of Object.entries(dailyCustomerJoins)) {
+    writer.set(db.collection("analyticsDaily").doc(dateKey), {
+      dateKey,
+      newCustomers,
+      updatedAt: FieldValue.serverTimestamp(),
+    }, { merge: true });
+  }
+  await writer.close();
   await ref.set({
     initialized: true,
     reconciliationVersion: RECONCILIATION_VERSION,
@@ -111,7 +123,7 @@ export async function reconcileOperationalTotals() {
     joinedToday: dailyCustomerJoins[todayKey] || 0,
     totalOrders,
     todayKey,
-    dailyCustomerJoins,
+    dailyCustomerJoins: FieldValue.delete(),
     lastReconciledAt: FieldValue.serverTimestamp(),
     lastUpdated: FieldValue.serverTimestamp(),
   }, { merge: true });

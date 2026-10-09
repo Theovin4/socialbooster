@@ -1,12 +1,7 @@
 import "server-only";
 import { unstable_cache } from "next/cache";
-import { FieldPath } from "firebase-admin/firestore";
-import { serviceSellingRateNgnMinor } from "./currency";
-import { adminDb } from "./firebase/admin";
-import { publicServiceId } from "./service-public-id";
-import { normalizePublicServiceName } from "./service-quality";
 import { providerDefinitions } from "./providers";
-import { PUBLIC_CATALOG_SNAPSHOT_VERSION, type PublicCatalogSnapshotItem } from "./public-catalog-snapshot";
+import { readPublicCatalogSnapshot } from "./public-catalog-snapshot";
 
 export { publicServiceId } from "./service-public-id";
 
@@ -39,58 +34,13 @@ export type ServiceCatalogPage = {
   totalPages: number;
 };
 
-const CATALOG_CHUNK_SIZE = 400;
-
-type CatalogChunk = { items: CachedService[]; lastId: string | null; hasMore: boolean };
-
-function getCatalogChunk(afterId: string) {
-  return unstable_cache(async (): Promise<CatalogChunk> => {
-    let query = adminDb().collection("services")
-      .where("active", "==", true)
-      .orderBy(FieldPath.documentId())
-      .select("name", "publicName", "categoryName", "type", "minQuantity", "maxQuantity", "refillSupported", "cancelSupported", "providerRateMinor", "updatedAt", "seoEligible", "featured", "paidAdsEligible")
-      .limit(CATALOG_CHUNK_SIZE);
-    if (afterId) query = query.startAfter(afterId);
-    const snapshot = await query.get();
-    const items = snapshot.docs.map((doc) => {
-    const item = doc.data();
-    return {
-      id: publicServiceId(doc.id),
-      internalId: doc.id,
-      name: String(item.publicName || normalizePublicServiceName(String(item.name || "Service"), String(item.categoryName || "Other"))),
-      category: String(item.categoryName || "Other"),
-      type: String(item.type || "default"),
-      // Keep the shared list cache compact. Full descriptions remain in the
-      // individual Firestore service document and are loaded only where a
-      // dedicated service page needs them.
-      description: "",
-      min: Number(item.minQuantity || 1),
-      max: Number(item.maxQuantity || 1),
-      refill: item.refillSupported === true,
-      cancel: item.cancelSupported === true,
-      rateMinor: Number(serviceSellingRateNgnMinor(item)),
-      updatedAt: item.updatedAt?.toDate?.().toISOString?.() || null,
-      seoEligible: item.seoEligible === true,
-      featured: item.featured === true,
-      paidAdsEligible: item.paidAdsEligible === true,
-    };
-    });
-    return { items, lastId: snapshot.docs.at(-1)?.id || null, hasMore: snapshot.size === CATALOG_CHUNK_SIZE };
-  }, ["active-service-catalog-v7-chunk", afterId || "start"], { revalidate: 86_400, tags: [SERVICE_CATALOG_TAG] })();
-}
-
 const getMaterializedCatalog = unstable_cache(async (): Promise<CachedService[] | null> => {
-  const db = adminDb();
   const providers = providerDefinitions().filter((provider) => provider.configured).map((provider) => provider.key);
   if (!providers.length) return null;
-  const manifests = await db.getAll(...providers.map((provider) => db.collection("publicCatalogManifests").doc(provider)));
-  if (manifests.some((snapshot) => !snapshot.exists || snapshot.get("version") !== PUBLIC_CATALOG_SNAPSHOT_VERSION)) return null;
-  const refs = manifests.flatMap((manifest) => Array.from({ length: Number(manifest.get("chunkCount") || 0) }, (_, index) => db.collection("publicCatalogChunks").doc(`${manifest.id}_${String(index).padStart(4, "0")}`)));
-  if (!refs.length) return [];
-  const chunks = await db.getAll(...refs);
-  const items = chunks.flatMap((snapshot) => snapshot.exists && snapshot.get("version") === PUBLIC_CATALOG_SNAPSHOT_VERSION ? snapshot.get("items") as PublicCatalogSnapshotItem[] : []).filter((item) => item.active !== false);
+  const snapshots = await Promise.all(providers.map(readPublicCatalogSnapshot));
+  const items = snapshots.flatMap((snapshot) => snapshot?.items || []).filter((item) => item.active !== false);
   return items.map((item) => ({ ...item, updatedAt: item.updatedAt || null }));
-}, ["active-service-catalog-materialized-v1"], { revalidate: 86_400, tags: [SERVICE_CATALOG_TAG] });
+}, ["active-service-catalog-materialized-v2"], { revalidate: 86_400, tags: [SERVICE_CATALOG_TAG] });
 
 /**
  * The catalogue is shared by every visitor. It is cached in bounded chunks so
@@ -98,16 +48,7 @@ const getMaterializedCatalog = unstable_cache(async (): Promise<CachedService[] 
  */
 export async function getActiveServiceCatalog(): Promise<CachedService[]> {
   const materialized = await getMaterializedCatalog();
-  if (materialized) return materialized.sort((a, b) => a.category.localeCompare(b.category) || a.name.localeCompare(b.name));
-  const catalog: CachedService[] = [];
-  let afterId = "";
-  for (let page = 0; page < 100; page += 1) {
-    const chunk = await getCatalogChunk(afterId);
-    catalog.push(...chunk.items);
-    if (!chunk.hasMore || !chunk.lastId || chunk.lastId === afterId) break;
-    afterId = chunk.lastId;
-  }
-  return catalog.sort((a, b) => a.category.localeCompare(b.category) || a.name.localeCompare(b.name));
+  return (materialized || []).sort((a, b) => a.category.localeCompare(b.category) || a.name.localeCompare(b.name));
 }
 
 /**

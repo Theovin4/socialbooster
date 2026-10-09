@@ -8,6 +8,8 @@ import { sendUserEmail } from "./email";
 import { orderStatusEmailCopy, shouldSendOrderStatusEmail } from "./order-email-policy";
 import { terminalRefundDecision } from "./order-refund-policy";
 import { recordCompletedOrderMarketing } from "./marketing-profile";
+import { recordFinanceOrderStatus } from "./firebase/analytics-rollups";
+import { createCustomerNotification } from "./customer-notifications";
 
 const STALE_AFTER_MS = 60_000;
 
@@ -64,8 +66,9 @@ export async function synchronizeOrderDocuments(documents: DocumentSnapshot[], f
     await doc.ref.set(update, { merge: true });
     if (status !== previous) {
       updated += 1;
+      await recordFinanceOrderStatus(doc.id, String(previous || "pending"), String(status), Number(doc.get("providerCostMinor") || 0));
       await db.collection("orderEvents").add({ orderId: doc.id, userId: doc.get("userId"), status, previousStatus: previous, createdAt: FieldValue.serverTimestamp() });
-      await db.collection("notifications").add({ userId: doc.get("userId"), type: "order_status", title: `Order ${status.replaceAll("_", " ")}`, orderId: doc.id, read: false, createdAt: FieldValue.serverTimestamp() });
+      await createCustomerNotification({ userId: doc.get("userId"), type: "order_status", title: `Order ${status.replaceAll("_", " ")}`, orderId: doc.id });
       const routineEmailCount = Number(doc.get("customerRoutineEmailCount") || 0);
       if (process.env.RESEND_API_KEY && process.env.EMAIL_FROM && shouldSendOrderStatusEmail(status, routineEmailCount)) {
         const copy = orderStatusEmailCopy(status, doc.id.slice(0, 8));

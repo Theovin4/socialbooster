@@ -7,6 +7,7 @@ import { adminDb } from "@/lib/firebase/admin";
 import { requireUser } from "@/lib/firebase/session";
 import { getProvider } from "@/lib/providers";
 import { sendAdminAlert } from "@/lib/email";
+import { createCustomerNotification } from "@/lib/customer-notifications";
 
 async function ownedOrder(id: string, userId: string) {
   const ref = adminDb().collection("orders").doc(id), snapshot = await ref.get();
@@ -38,7 +39,7 @@ export async function requestCancellation(formData: FormData) {
     if (result?.accepted) {
       await ref.set({ cancellationStatus: "submitted", cancellationProviderResponse: { accepted: true, order: result.order }, updatedAt: FieldValue.serverTimestamp() }, { merge: true });
       await db.collection("orderEvents").add({ orderId: id, userId: user.uid, status: "cancel_requested", previousStatus, providerOrderId: data.providerOrderId, createdAt: FieldValue.serverTimestamp() });
-      await db.collection("notifications").add({ userId: user.uid, type: "cancellation", title: "Cancellation request submitted", orderId: id, read: false, createdAt: FieldValue.serverTimestamp() });
+      await createCustomerNotification({ userId: user.uid, type: "cancellation", title: "Cancellation request submitted", orderId: id });
     } else if (result?.error) {
       await ref.set({ status: previousStatus, cancellationStatus: "rejected", cancellationReason: result.error, updatedAt: FieldValue.serverTimestamp() }, { merge: true });
       notice = "cancellation-rejected";

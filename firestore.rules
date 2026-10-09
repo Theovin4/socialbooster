@@ -19,9 +19,10 @@ service cloud.firestore {
     match /supportTickets/{id} { allow read: if signedIn() && (resource.data.userId == request.auth.uid || admin()); allow write: if false; }
     match /supportMessages/{id} { allow read: if signedIn() && (resource.data.userId == request.auth.uid || admin()); allow write: if false; }
     match /supportAttachments/{id} { allow read, write: if false; }
-    match /notifications/{id} { allow read, update: if signedIn() && resource.data.userId == request.auth.uid; allow create, delete: if false; }
+    match /notifications/{id} { allow read: if signedIn() && resource.data.userId == request.auth.uid; allow write: if false; }
+    match /notificationSummaries/{userId} { allow read: if owns(userId) || admin(); allow write: if false; }
     match /customerApiKeys/{id} { allow read: if signedIn() && resource.data.userId == request.auth.uid; allow write: if false; }
-    match /services/{id} { allow read: if true; allow write: if false; }
+    match /services/{id} { allow read: if admin(); allow write: if false; }
     match /serviceCategories/{id} { allow read: if true; allow write: if false; }
     match /blogPosts/{id} { allow read: if resource.data.status == "published" || admin(); allow write: if false; }
     match /marketingProfiles/{id} { allow read, write: if false; }
