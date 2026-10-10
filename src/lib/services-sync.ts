@@ -7,7 +7,7 @@ import { DEFAULT_GROSS_MARGIN_BPS, decimalToMinor, grossMarginBps, markupBps, se
 import { providerDefinitions, providerServiceDocumentId, type ProviderDefinition, type ProviderKey } from "./providers";
 import { evaluateServiceQuality } from "./service-quality";
 import { publicServiceId } from "./service-public-id";
-import { readPublicCatalogSnapshot, writePublicCatalogSnapshot, type PublicCatalogSnapshotItem } from "./public-catalog-snapshot";
+import { PUBLIC_CATALOG_SNAPSHOT_CHUNK_SIZE, readPublicCatalogSnapshot, writePublicCatalogSnapshot, type PublicCatalogSnapshotItem } from "./public-catalog-snapshot";
 
 const FINGERPRINT_VERSION = 1;
 const FINGERPRINT_CHUNK_SIZE = 500;
@@ -226,7 +226,9 @@ export async function synchronizeProviderServices(providerKey: ProviderDefinitio
     const publicSnapshot = await writePublicCatalogSnapshot(provider.key, [...publicMap.values()]);
     const fingerprintSnapshot = await writeFingerprintSnapshot(provider.key, lock.state, fingerprints, catalogueHash);
     const result = { provider: provider.key, providerCurrency, providerBalance: balance.balance, providerFunded, serviceCount: rows.length, publicServiceCount: publicMap.size, publicCatalogSnapshot: publicSnapshot, changedCount: changedIds.length + diff.removed.length, repricedCount: changedIds.length, unchangedCount: diff.unchanged, shortCircuited: false, baselineInitialized: legacyBaseline, durationMs: Date.now() - startedAt };
-    const metrics = { providerRowsReturned: rows.length, firestoreReads: 2 + Math.ceil((previousFingerprints?.length || 0) / FINGERPRINT_CHUNK_SIZE) + changedIds.length * 2, firestoreRecordsCompared: previousFingerprints?.length || 0, newRecords: diff.added.length, changedRecords: diff.changed.length, removedRecords: diff.removed.length, unchangedRecords: diff.unchanged, firestoreWrites: serviceWrites + fingerprintSnapshot.chunkCount + (publicSnapshot.changed ? publicSnapshot.chunkCount + 1 : 0) + 4, publicSnapshotChanged: publicSnapshot.changed, fallbackActivated: previousPublic?.fallbackUsed === true, shortCircuited: false, baselineInitialized: legacyBaseline };
+    const fingerprintChunkReads = Math.ceil((previousFingerprints?.length || 0) / FINGERPRINT_CHUNK_SIZE);
+    const publicSnapshotReads = 1 + Math.ceil((previousPublic?.items.length || 0) / PUBLIC_CATALOG_SNAPSHOT_CHUNK_SIZE);
+    const metrics = { providerRowsReturned: rows.length, firestoreReads: 4 + fingerprintChunkReads + publicSnapshotReads + changedIds.length * 2, firestoreRecordsCompared: previousFingerprints?.length || 0, newRecords: diff.added.length, changedRecords: diff.changed.length, removedRecords: diff.removed.length, unchangedRecords: diff.unchanged, firestoreWrites: serviceWrites + fingerprintSnapshot.chunkCount + (publicSnapshot.changed ? publicSnapshot.chunkCount + 1 : 0) + 4, publicSnapshotChanged: publicSnapshot.changed, fallbackActivated: previousPublic?.fallbackUsed === true, shortCircuited: false, baselineInitialized: legacyBaseline };
     await finishSync(lock.ref, lock.token, { ...result, status: "completed", catalogueHash, fingerprintVersion: FINGERPRINT_VERSION, activeFingerprintSlot: fingerprintSnapshot.slot, fingerprintChunkCount: fingerprintSnapshot.chunkCount, fingerprintSlots: fingerprintSnapshot.slots, publicCatalogueHash: publicSnapshot.hash, lastMetrics: metrics, lastHeartbeatAt: FieldValue.serverTimestamp() });
     await recordSyncRun(provider.key, startedAt, metrics);
     console.info("[services:sync] completed", result);

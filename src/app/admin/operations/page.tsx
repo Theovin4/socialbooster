@@ -12,7 +12,7 @@ const workflows = [
   ["Customer dashboard", "Up to 8", "One wallet document, five recent orders and two aggregation queries."],
   ["Customer order history", "Up to 20", "Cursor pagination; no second query after refresh."],
   ["Admin overview", "Bounded", "Compact totals, daily rollups and three provider state documents."],
-  ["Finance dashboard", "Up to 27", "Compact rollups plus no more than 25 recent matching orders."],
+  ["Finance dashboard", "26 default / up to 126", "One global rollup, bounded daily rollups and no more than 25 recent matching orders."],
   ["Unchanged provider sync", "About 2 reads / 4 writes", "Catalogue hash short-circuits before inventory reads."],
 ] as const;
 
