@@ -20,7 +20,11 @@ export async function POST(request: Request) {
   if (!id || !timestamp || !signature) return new Response("Missing webhook signature", { status: 400 });
   const payload = await request.text();
   let event: ReceivedEvent;
-  try { event = new Webhook(secret).verify(payload, { "svix-id": id, "svix-timestamp": timestamp, "svix-signature": signature }) as ReceivedEvent; }
+  try {
+    new Webhook(secret).verify(payload, { "svix-id": id, "svix-timestamp": timestamp, "svix-signature": signature });
+    event = JSON.parse(payload) as ReceivedEvent;
+    if (!event || typeof event.type !== "string") throw new Error("Invalid event payload");
+  }
   catch { return new Response("Invalid webhook signature", { status: 400 }); }
   const db = adminDb(), eventRef = db.collection("resendWebhookEvents").doc(id);
   const claimed = await eventRef.create({ type: event.type, createdAt: FieldValue.serverTimestamp(), expiresAt: new Date(Date.now() + 90 * 86_400_000) }).then(() => true).catch(() => false);
