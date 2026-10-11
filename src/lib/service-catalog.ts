@@ -1,7 +1,14 @@
 import "server-only";
 import { unstable_cache } from "next/cache";
-import { providerDefinitions } from "./providers";
-import { readPublicCatalogSnapshot } from "./public-catalog-snapshot";
+import { providerDefinitions, type ProviderKey } from "./providers";
+import {
+  publicCatalogHash,
+  readPublicCatalogSnapshotChunk,
+  readPublicCatalogSnapshotDescriptor,
+  recordPublicCatalogSnapshotFallback,
+  type PublicCatalogSnapshotDescriptor,
+  type PublicCatalogSnapshotItem,
+} from "./public-catalog-snapshot";
 
 export { publicServiceId } from "./service-public-id";
 
@@ -34,21 +41,61 @@ export type ServiceCatalogPage = {
   totalPages: number;
 };
 
-const getMaterializedCatalog = unstable_cache(async (): Promise<CachedService[] | null> => {
-  const providers = providerDefinitions().filter((provider) => provider.configured).map((provider) => provider.key);
-  if (!providers.length) return null;
-  const snapshots = await Promise.all(providers.map(readPublicCatalogSnapshot));
-  const items = snapshots.flatMap((snapshot) => snapshot?.items || []).filter((item) => item.active !== false);
-  return items.map((item) => ({ ...item, updatedAt: item.updatedAt || null }));
-}, ["active-service-catalog-materialized-v2"], { revalidate: 86_400, tags: [SERVICE_CATALOG_TAG] });
+const getCachedSnapshotDescriptor = unstable_cache(
+  async (provider: ProviderKey) => readPublicCatalogSnapshotDescriptor(provider),
+  ["active-service-catalog-descriptor-v1"],
+  { revalidate: 86_400, tags: [SERVICE_CATALOG_TAG] },
+);
+
+const getCachedSnapshotChunk = unstable_cache(
+  async (provider: ProviderKey, version: 1 | 2, slot: "a" | "b" | "legacy", index: number, hash: string) =>
+    readPublicCatalogSnapshotChunk(provider, version, slot, index, hash || null),
+  ["active-service-catalog-chunk-v1"],
+  { revalidate: 86_400, tags: [SERVICE_CATALOG_TAG] },
+);
+
+type DescriptorSlot = PublicCatalogSnapshotDescriptor["active"];
+
+async function loadDescriptorSlot(provider: ProviderKey, version: 1 | 2, slot: DescriptorSlot): Promise<PublicCatalogSnapshotItem[] | null> {
+  const chunks = await Promise.all(Array.from({ length: slot.chunkCount }, (_, index) =>
+    getCachedSnapshotChunk(provider, version, slot.slot, index, slot.hash || ""),
+  ));
+  if (chunks.some((chunk) => !chunk)) return null;
+  const items = chunks.flatMap((chunk) => chunk || []);
+  if (slot.serviceCount !== null && items.length !== slot.serviceCount) return null;
+  if (slot.hash && publicCatalogHash(items) !== slot.hash) return null;
+  return items;
+}
+
+async function loadProviderCatalog(provider: ProviderKey): Promise<PublicCatalogSnapshotItem[]> {
+  const descriptor = await getCachedSnapshotDescriptor(provider);
+  if (!descriptor) return [];
+  const active = await loadDescriptorSlot(provider, descriptor.version, descriptor.active);
+  if (active) return active;
+  if (descriptor.previous) {
+    const previous = await loadDescriptorSlot(provider, descriptor.version, descriptor.previous);
+    if (previous) {
+      await recordPublicCatalogSnapshotFallback(provider, true);
+      return previous;
+    }
+  }
+  await recordPublicCatalogSnapshotFallback(provider, false);
+  return [];
+}
 
 /**
  * The catalogue is shared by every visitor. It is cached in bounded chunks so
  * no Vercel cache item can exceed the 2 MB platform limit.
  */
 export async function getActiveServiceCatalog(): Promise<CachedService[]> {
-  const materialized = await getMaterializedCatalog();
-  return (materialized || []).sort((a, b) => a.category.localeCompare(b.category) || a.name.localeCompare(b.name));
+  const providers = providerDefinitions().filter((provider) => provider.configured).map((provider) => provider.key);
+  if (!providers.length) return [];
+  const snapshots = await Promise.all(providers.map(loadProviderCatalog));
+  return snapshots
+    .flat()
+    .filter((item) => item.active !== false)
+    .map((item) => ({ ...item, updatedAt: item.updatedAt || null }))
+    .sort((a, b) => a.category.localeCompare(b.category) || a.name.localeCompare(b.name));
 }
 
 /**

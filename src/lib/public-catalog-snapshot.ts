@@ -26,9 +26,14 @@ export type PublicCatalogSnapshotItem = {
   active: boolean;
 };
 
-type SnapshotSlot = "a" | "b";
-type SlotMetadata = { chunkCount: number; hash: string; serviceCount: number };
+export type SnapshotSlot = "a" | "b";
+export type SlotMetadata = { chunkCount: number; hash: string; serviceCount: number };
 type SnapshotRead = { items: PublicCatalogSnapshotItem[]; hash: string | null; slot: SnapshotSlot | "legacy"; fallbackUsed: boolean };
+export type PublicCatalogSnapshotDescriptor = {
+  version: 1 | 2;
+  active: { slot: SnapshotSlot | "legacy"; chunkCount: number; serviceCount: number | null; hash: string | null };
+  previous: { slot: SnapshotSlot; chunkCount: number; serviceCount: number; hash: string } | null;
+};
 
 function stableItem(item: PublicCatalogSnapshotItem) {
   return { id: item.id, internalId: item.internalId, name: item.name, category: item.category, type: item.type, description: item.description, min: item.min, max: item.max, refill: item.refill, cancel: item.cancel, rateMinor: item.rateMinor, seoEligible: item.seoEligible, featured: item.featured, paidAdsEligible: item.paidAdsEligible, active: item.active };
@@ -67,6 +72,67 @@ async function recordFallback(provider: ProviderKey, reason: string, recovered: 
     recoveryResult: recovered ? "previous_snapshot_loaded" : "no_bounded_snapshot_available", active: !recovered,
     lastSeenAt: FieldValue.serverTimestamp(), activationCount: FieldValue.increment(1),
   }, { merge: true }).catch(() => undefined);
+}
+
+/**
+ * Reads only the tiny manifest. Catalogue consumers cache this separately from
+ * the immutable chunks so no Next.js cache entry can exceed Vercel's 2 MB
+ * item limit.
+ */
+export async function readPublicCatalogSnapshotDescriptor(provider: ProviderKey): Promise<PublicCatalogSnapshotDescriptor | null> {
+  const manifest = await adminDb().collection("publicCatalogManifests").doc(provider).get();
+  if (!manifest.exists) { await recordFallback(provider, "manifest_missing", false); return null; }
+  if (manifest.get("version") === PUBLIC_CATALOG_SNAPSHOT_VERSION) {
+    const activeSlot: SnapshotSlot = manifest.get("activeSlot") === "b" ? "b" : "a";
+    const previousSlot: SnapshotSlot | null = manifest.get("previousSlot") === "b" ? "b" : manifest.get("previousSlot") === "a" ? "a" : null;
+    const slots = (manifest.get("slots") || {}) as Record<string, unknown>;
+    const active = slotMetadata(slots[activeSlot]);
+    const previous = previousSlot ? slotMetadata(slots[previousSlot]) : null;
+    if (!active) { await recordFallback(provider, "active_snapshot_manifest_invalid", Boolean(previous)); }
+    return active ? {
+      version: 2,
+      active: { slot: activeSlot, ...active },
+      previous: previousSlot && previous ? { slot: previousSlot, ...previous } : null,
+    } : previousSlot && previous ? {
+      version: 2,
+      active: { slot: previousSlot, ...previous },
+      previous: null,
+    } : null;
+  }
+  if (manifest.get("version") === 1) {
+    const chunkCount = Number(manifest.get("chunkCount") || 0);
+    if (!Number.isSafeInteger(chunkCount) || chunkCount < 0 || chunkCount > 100) return null;
+    const serviceCountValue = Number(manifest.get("serviceCount"));
+    return {
+      version: 1,
+      active: { slot: "legacy", chunkCount, serviceCount: Number.isSafeInteger(serviceCountValue) && serviceCountValue >= 0 ? serviceCountValue : null, hash: null },
+      previous: null,
+    };
+  }
+  return null;
+}
+
+/** One bounded immutable chunk read, suitable for an individual cache entry. */
+export async function readPublicCatalogSnapshotChunk(
+  provider: ProviderKey,
+  version: 1 | 2,
+  slot: SnapshotSlot | "legacy",
+  index: number,
+  expectedHash: string | null,
+): Promise<PublicCatalogSnapshotItem[] | null> {
+  if (!Number.isSafeInteger(index) || index < 0 || index > 9999) return null;
+  const id = version === 1
+    ? `${provider}_${String(index).padStart(4, "0")}`
+    : `${provider}_${slot}_${String(index).padStart(4, "0")}`;
+  const chunk = await adminDb().collection("publicCatalogChunks").doc(id).get();
+  if (!chunk.exists || chunk.get("version") !== version) return null;
+  if (version === 2 && (slot === "legacy" || chunk.get("snapshotHash") !== expectedHash)) return null;
+  const items = chunk.get("items");
+  return Array.isArray(items) ? items as PublicCatalogSnapshotItem[] : null;
+}
+
+export async function recordPublicCatalogSnapshotFallback(provider: ProviderKey, recovered: boolean) {
+  await recordFallback(provider, "cached_active_snapshot_invalid", recovered);
 }
 
 /** Reads only manifest-bounded snapshots. It never scans the services collection. */
