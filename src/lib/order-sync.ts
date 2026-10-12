@@ -84,8 +84,14 @@ export async function synchronizeOrderDocuments(documents: DocumentSnapshot[], f
       const refund = Number(serviceCostMinor(BigInt(sellingRateMinor), refundableQuantity));
       if (refund > 0 && customerPriceMinor > 0) {
         const amount = Math.min(refund, customerPriceMinor);
-        const result = await postWallet({ userId: doc.get("userId"), type: "refund", deltaMinor: amount, currency: String(doc.get("currency") || "NGN"), idempotencyKey: `status-refund:${doc.id}`, reference: doc.id, reason: `Order ${candidateStatus} after confirmed provider status` });
-        await db.collection("auditLogs").add({ action: "order_refund_confirmed", targetType: "order", targetId: doc.id, providerKey, providerOrderId: doc.get("providerOrderId"), candidateStatus, amountMinor: amount, duplicate: result.duplicate, createdAt: FieldValue.serverTimestamp() });
+        const manualRefund = await db.collection("walletTransactions").doc(`admin-order-refund:${doc.id}`).get();
+        if (!manualRefund.exists) {
+          const result = await postWallet({ userId: doc.get("userId"), type: "refund", deltaMinor: amount, currency: String(doc.get("currency") || "NGN"), idempotencyKey: `status-refund:${doc.id}`, reference: doc.id, reason: `Order ${candidateStatus} after confirmed provider status` });
+          await doc.ref.set({ refundedAmountMinor: amount, refundedAt: FieldValue.serverTimestamp(), refundSource: "system_status_reconciliation" }, { merge: true });
+          await db.collection("auditLogs").add({ action: "order_refund_confirmed", targetType: "order", targetId: doc.id, providerKey, providerOrderId: doc.get("providerOrderId"), candidateStatus, amountMinor: amount, duplicate: result.duplicate, createdAt: FieldValue.serverTimestamp() });
+        } else {
+          await db.collection("auditLogs").add({ action: "order_refund_skipped_existing_admin_refund", targetType: "order", targetId: doc.id, candidateStatus, createdAt: FieldValue.serverTimestamp() });
+        }
       }
     }
   }

@@ -10,6 +10,7 @@ import { publicServiceId } from "./service-public-id";
 import { PUBLIC_CATALOG_SNAPSHOT_CHUNK_SIZE, readPublicCatalogSnapshot, writePublicCatalogSnapshot, type PublicCatalogSnapshotItem } from "./public-catalog-snapshot";
 
 const FINGERPRINT_VERSION = 1;
+const QUALITY_RULESET_VERSION = 2;
 const FINGERPRINT_CHUNK_SIZE = 500;
 const MANUAL_SYNC_COOLDOWN_MS = 5 * 60 * 1000;
 const SYNC_LOCK_MS = 10 * 60 * 1000;
@@ -48,9 +49,8 @@ export function removedServiceState() {
   return { active: false, publicEligibility: "hidden", hiddenReasons: ["removed_from_provider_catalog"] } as const;
 }
 
-function safeDescription(value: unknown, name: string, category: string) {
-  const cleaned = String(value || "").replace(/<[^>]*>/g, " ").replace(/\s+/g, " ").trim().slice(0, 700);
-  return cleaned || `${name} is available in the ${category} category. Review the quantity limits and use the correct public profile or content link before ordering.`;
+function safeDescription(_value: unknown, name: string, category: string) {
+  return `${name} is listed under ${category}. Review the quantity range, use the correct public profile or content link, and confirm the order details before submitting.`;
 }
 
 function hashRecord(value: unknown) {
@@ -166,15 +166,30 @@ export async function synchronizeProviderServices(providerKey: ProviderDefinitio
       const fingerprint = hashRecord({ ...providerData, providerFunded, grossMarginTargetBps: Number(grossMarginTargetBps), usdToNgn: String(usdToNgn) });
       return { id, item, providerData, providerRateNgnMinor, nativeRateMinor, fingerprint };
     });
+    const qualityById = new Map(normalized.map((row) => {
+      const sellingRateMinor = sellingPriceForGrossMarginMinor(row.providerRateNgnMinor, grossMarginTargetBps);
+      return [row.id, evaluateServiceQuality({ name: row.item.name, category: row.item.category, min: row.item.min, max: row.item.max, rateMinor: row.providerRateNgnMinor, sellingRateMinor, providerFunded, type: row.item.type, refill: row.item.refill, cancel: row.item.cancel })] as const;
+    }));
+    const duplicateCounts = new Map<string, number>();
+    for (const quality of qualityById.values()) duplicateCounts.set(quality.duplicateGroupKey, (duplicateCounts.get(quality.duplicateGroupKey) || 0) + 1);
+    const qualitySummary = {
+      publicEligible: [...qualityById.values()].filter((quality) => quality.publicEligible).length,
+      hiddenAnomalies: [...qualityById.values()].filter((quality) => quality.priceStatus !== "NORMAL").length,
+      complianceHidden: [...qualityById.values()].filter((quality) => quality.complianceStatus !== "APPROVED").length,
+      malformedNames: [...qualityById.values()].filter((quality) => quality.hiddenReasons.includes("invalid_service_name") || quality.hiddenReasons.includes("instruction_row")).length,
+      providerLabelsRemoved: rows.filter((item) => /\b(?:followspanel|follows\s*panel|nitro\s*(?:ng)?|smm\s*world)\b/i.test(item.name)).length,
+      duplicateGroups: [...duplicateCounts.values()].filter((count) => count > 1).length,
+    };
     const fingerprints = normalized.map(({ id, fingerprint }) => ({ id, fingerprint })), catalogueHash = providerCatalogueHash(fingerprints);
-    if (lock.state.catalogueHash === catalogueHash && lock.state.fingerprintVersion === FINGERPRINT_VERSION) {
-      const result = { provider: provider.key, providerCurrency, providerBalance: balance.balance, providerFunded, serviceCount: rows.length, publicServiceCount: Number(lock.state.publicServiceCount || 0), changedCount: 0, repricedCount: 0, unchangedCount: rows.length, shortCircuited: true, durationMs: Date.now() - startedAt };
+    if (lock.state.catalogueHash === catalogueHash && lock.state.fingerprintVersion === FINGERPRINT_VERSION && lock.state.qualityRulesetVersion === QUALITY_RULESET_VERSION) {
+      const result = { provider: provider.key, providerCurrency, providerBalance: balance.balance, providerFunded, serviceCount: rows.length, publicServiceCount: Number(lock.state.publicServiceCount || 0), qualitySummary, changedCount: 0, repricedCount: 0, unchangedCount: rows.length, shortCircuited: true, durationMs: Date.now() - startedAt };
       const metrics = { providerRowsReturned: rows.length, firestoreReads: 2, firestoreRecordsCompared: 0, newRecords: 0, changedRecords: 0, removedRecords: 0, unchangedRecords: rows.length, firestoreWrites: 4, publicSnapshotChanged: false, fallbackActivated: false, shortCircuited: true };
       await finishSync(lock.ref, lock.token, { ...result, status: "completed", lastMetrics: metrics, lastHeartbeatAt: FieldValue.serverTimestamp() });
       await recordSyncRun(provider.key, startedAt, metrics);
       return result;
     }
 
+    const qualityMigration = lock.state.qualityRulesetVersion !== QUALITY_RULESET_VERSION;
     const previousFingerprints = await readFingerprintSnapshot(provider.key, lock.state);
     const legacyBaseline = !previousFingerprints && (lock.state.completedAt || Number(lock.state.serviceCount || 0) > 0);
     const diff = previousFingerprints ? diffProviderFingerprints(previousFingerprints, fingerprints) : legacyBaseline ? { added: [], changed: [], removed: [], unchanged: rows.length } : { added: fingerprints.map((entry) => entry.id), changed: [], removed: [], unchanged: 0 };
@@ -185,30 +200,31 @@ export async function synchronizeProviderServices(providerKey: ProviderDefinitio
     let serviceWrites = 0;
 
     const publicItemFor = (row: typeof normalized[number], stored?: FirebaseFirestore.DocumentData): PublicCatalogSnapshotItem | null => {
-      const quality = evaluateServiceQuality({ name: row.item.name, category: row.item.category, min: row.item.min, max: row.item.max, rateMinor: row.providerRateNgnMinor, providerFunded });
+      const sellingRateMinor = sellingPriceForGrossMarginMinor(row.providerRateNgnMinor, grossMarginTargetBps);
+      const quality = qualityById.get(row.id)!;
       const old = publicMap.get(row.id), visibilityOverride = stored?.visibilityOverride === "show" || stored?.visibilityOverride === "hide" ? stored.visibilityOverride : null;
-      const active = visibilityOverride === "show" ? providerFunded : visibilityOverride === "hide" ? false : quality.publicEligible;
-      if (!quality.publicEligible && !old && visibilityOverride !== "show") return null;
-      const name = typeof stored?.publicNameOverride === "string" && stored.publicNameOverride.trim() ? stored.publicNameOverride.trim().slice(0, 140) : old?.name || quality.publicName;
-      return { id: publicServiceId(row.id), internalId: row.id, name, category: quality.normalizedCategory, type: row.item.type, description: safeDescription(row.providerData.description, name, quality.normalizedCategory), min: row.item.min, max: row.item.max, refill: row.item.refill, cancel: row.item.cancel, rateMinor: Number(sellingPriceForGrossMarginMinor(row.providerRateNgnMinor, grossMarginTargetBps)), updatedAt: new Date().toISOString(), seoEligible: stored?.seoEligibilityOverride === "index" || old?.seoEligible === true, featured: stored?.featured === true || old?.featured === true, paidAdsEligible: stored?.paidAdsEligible === true || old?.paidAdsEligible === true, active };
+      const active = quality.publicEligible && visibilityOverride !== "hide" && (visibilityOverride === "show" || old?.active !== false);
+      if (!quality.publicEligible && !old) return null;
+      const name = typeof stored?.publicNameOverride === "string" && stored.publicNameOverride.trim() ? stored.publicNameOverride.trim().slice(0, 140) : quality.publicName;
+      return { id: publicServiceId(row.id), internalId: row.id, name, category: quality.normalizedCategory, type: row.item.type, description: safeDescription(row.providerData.description, name, quality.normalizedCategory), min: row.item.min, max: row.item.max, refill: row.item.refill, cancel: row.item.cancel, rateMinor: Number(sellingRateMinor), updatedAt: new Date().toISOString(), seoEligible: quality.publicEligible && (stored?.seoEligibilityOverride === "index" || old?.seoEligible === true), featured: quality.publicEligible && (stored?.featured === true || old?.featured === true), paidAdsEligible: quality.publicEligible && (stored?.paidAdsEligible === true || old?.paidAdsEligible === true), active };
     };
 
-    if (legacyBaseline) {
+    if (legacyBaseline || qualityMigration) {
       // Bootstrap compact state from the already synchronized catalogue without
       // reading or rewriting all service documents.
       for (const row of normalized) {
         const item = publicItemFor(row);
-        if (item) publicMap.set(row.id, { ...(publicMap.get(row.id) || item), description: item.description, rateMinor: item.rateMinor });
+        if (item) publicMap.set(row.id, item); else publicMap.delete(row.id);
       }
     } else {
       for (const id of changedIds) {
         const row = rowMap.get(id); if (!row) continue;
-        const stored = existing.services.get(id), quality = evaluateServiceQuality({ name: row.item.name, category: row.item.category, min: row.item.min, max: row.item.max, rateMinor: row.providerRateNgnMinor, providerFunded });
+        const stored = existing.services.get(id), sellingRateMinor = sellingPriceForGrossMarginMinor(row.providerRateNgnMinor, grossMarginTargetBps);
+        const quality = qualityById.get(id)!;
         const visibilityOverride = stored?.visibilityOverride === "show" || stored?.visibilityOverride === "hide" ? stored.visibilityOverride : null;
-        const active = visibilityOverride === "show" ? providerFunded : visibilityOverride === "hide" ? false : quality.publicEligible;
+        const active = quality.publicEligible && visibilityOverride !== "hide";
         const publicName = typeof stored?.publicNameOverride === "string" && stored.publicNameOverride.trim() ? stored.publicNameOverride.trim().slice(0, 140) : quality.publicName;
-        const sellingRateMinor = sellingPriceForGrossMarginMinor(row.providerRateNgnMinor, grossMarginTargetBps);
-        const customerData = { ...row.providerData, rawName: row.item.name, publicName, categoryName: quality.normalizedCategory, publicStatus: stored?.publicStatus === "hidden" || stored?.publicStatus === "review" ? stored.publicStatus : active ? "published" : "hidden", publicEligibility: quality.publicEligible ? "eligible" : "hidden", hiddenReasons: quality.hiddenReasons, featured: stored?.featured === true, flaggedForReview: stored?.flaggedForReview === true, paidAdsEligible: stored?.paidAdsEligible === true, seoEligible: stored?.seoEligibilityOverride === "index" };
+        const customerData = { ...row.providerData, rawName: row.item.name, publicName, categoryName: quality.normalizedCategory, publicStatus: active ? "published" : quality.complianceStatus === "REVIEW_REQUIRED" || quality.priceStatus === "PRICE_REVIEW" ? "review" : "hidden", publicEligibility: quality.publicEligible ? "eligible" : "hidden", hiddenReasons: quality.hiddenReasons, priceStatus: quality.priceStatus, complianceStatus: quality.complianceStatus, duplicateGroupKey: quality.duplicateGroupKey, featured: quality.publicEligible && stored?.featured === true, flaggedForReview: quality.complianceStatus === "REVIEW_REQUIRED" || quality.priceStatus === "PRICE_REVIEW" || stored?.flaggedForReview === true, paidAdsEligible: quality.publicEligible && stored?.paidAdsEligible === true, seoEligible: quality.publicEligible && stored?.seoEligibilityOverride === "index" };
         const pricingFingerprint = hashRecord({ ...customerData, providerRateNgnMinor: String(row.providerRateNgnMinor), grossMarginTargetBps: Number(grossMarginTargetBps), active });
         writer.set(db.collection("providerServices").doc(id), { ...row.providerData, syncFingerprint: row.fingerprint, lastSyncedAt: FieldValue.serverTimestamp() }, { merge: true });
         writer.set(db.collection("services").doc(id), { ...customerData, providerNativeRateMinor: Number(row.nativeRateMinor), providerRateMinor: Number(row.providerRateNgnMinor), providerRateNgnMinor: Number(row.providerRateNgnMinor), sellingCurrency: "NGN", sellingRateMinor: Number(sellingRateMinor), pricingModel: "ngn_gross_margin_v2", pricingFingerprint, grossMarginTargetBps: Number(grossMarginTargetBps), grossMarginBps: Number(grossMarginBps(row.providerRateNgnMinor, sellingRateMinor)), markupBps: Number(markupBps(row.providerRateNgnMinor, sellingRateMinor)), active, autoImported: true, customSellingRateMinor: FieldValue.delete(), marginBps: FieldValue.delete(), updatedAt: FieldValue.serverTimestamp(), ...(stored ? {} : { createdAt: FieldValue.serverTimestamp() }) }, { merge: true });
@@ -225,11 +241,11 @@ export async function synchronizeProviderServices(providerKey: ProviderDefinitio
     await writer.close();
     const publicSnapshot = await writePublicCatalogSnapshot(provider.key, [...publicMap.values()]);
     const fingerprintSnapshot = await writeFingerprintSnapshot(provider.key, lock.state, fingerprints, catalogueHash);
-    const result = { provider: provider.key, providerCurrency, providerBalance: balance.balance, providerFunded, serviceCount: rows.length, publicServiceCount: publicMap.size, publicCatalogSnapshot: publicSnapshot, changedCount: changedIds.length + diff.removed.length, repricedCount: changedIds.length, unchangedCount: diff.unchanged, shortCircuited: false, baselineInitialized: legacyBaseline, durationMs: Date.now() - startedAt };
+    const result = { provider: provider.key, providerCurrency, providerBalance: balance.balance, providerFunded, serviceCount: rows.length, publicServiceCount: publicMap.size, qualitySummary, publicCatalogSnapshot: publicSnapshot, changedCount: changedIds.length + diff.removed.length, repricedCount: changedIds.length, unchangedCount: diff.unchanged, shortCircuited: false, baselineInitialized: legacyBaseline, durationMs: Date.now() - startedAt };
     const fingerprintChunkReads = Math.ceil((previousFingerprints?.length || 0) / FINGERPRINT_CHUNK_SIZE);
     const publicSnapshotReads = 1 + Math.ceil((previousPublic?.items.length || 0) / PUBLIC_CATALOG_SNAPSHOT_CHUNK_SIZE);
     const metrics = { providerRowsReturned: rows.length, firestoreReads: 4 + fingerprintChunkReads + publicSnapshotReads + changedIds.length * 2, firestoreRecordsCompared: previousFingerprints?.length || 0, newRecords: diff.added.length, changedRecords: diff.changed.length, removedRecords: diff.removed.length, unchangedRecords: diff.unchanged, firestoreWrites: serviceWrites + fingerprintSnapshot.chunkCount + (publicSnapshot.changed ? publicSnapshot.chunkCount + 1 : 0) + 4, publicSnapshotChanged: publicSnapshot.changed, fallbackActivated: previousPublic?.fallbackUsed === true, shortCircuited: false, baselineInitialized: legacyBaseline };
-    await finishSync(lock.ref, lock.token, { ...result, status: "completed", catalogueHash, fingerprintVersion: FINGERPRINT_VERSION, activeFingerprintSlot: fingerprintSnapshot.slot, fingerprintChunkCount: fingerprintSnapshot.chunkCount, fingerprintSlots: fingerprintSnapshot.slots, publicCatalogueHash: publicSnapshot.hash, lastMetrics: metrics, lastHeartbeatAt: FieldValue.serverTimestamp() });
+    await finishSync(lock.ref, lock.token, { ...result, status: "completed", catalogueHash, fingerprintVersion: FINGERPRINT_VERSION, qualityRulesetVersion: QUALITY_RULESET_VERSION, activeFingerprintSlot: fingerprintSnapshot.slot, fingerprintChunkCount: fingerprintSnapshot.chunkCount, fingerprintSlots: fingerprintSnapshot.slots, publicCatalogueHash: publicSnapshot.hash, lastMetrics: metrics, lastHeartbeatAt: FieldValue.serverTimestamp() });
     await recordSyncRun(provider.key, startedAt, metrics);
     console.info("[services:sync] completed", result);
     return result;

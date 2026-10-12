@@ -34,6 +34,11 @@ export function ConsentManager() {
   useEffect(() => {
     if (!consent?.analytics) return;
     const query = new URLSearchParams(window.location.search);
+    const attribution = Object.fromEntries(["utm_source", "utm_medium", "utm_campaign", "utm_content"].flatMap((key) => {
+      const value = query.get(key)?.trim();
+      return value ? [[key, value.slice(0, 100)]] : [];
+    }));
+    if (Object.keys(attribution).length) window.localStorage.setItem("sb_attribution_v1", JSON.stringify(attribution));
     if (pathname === "/dashboard/wallet" && query.get("payment") === "success") {
       trackAnalyticsEvent("wallet_fund_success", { method: "flutterwave" });
       query.delete("payment");

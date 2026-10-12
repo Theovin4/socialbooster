@@ -85,13 +85,16 @@ export default async function OrderPage({
     });
   return (
     <AppShell>
-      {notice === "order-created" ? <><AnalyticsEvent event="order_success" parameters={{ service_id: order.serviceId ? publicServiceId(String(order.serviceId)) : "unknown" }} deduplicationKey={`order_success:${id}`} /><AnalyticsEvent event="purchase" deduplicationKey={`purchase:${id}`} parameters={{ transaction_id: id, currency: String(order.currency || "NGN"), value: Number(order.customerPriceMinor || 0) / 100, items: [{ item_id: order.serviceId ? publicServiceId(String(order.serviceId)) : "unknown", item_name: String(order.serviceName || "Social media service"), quantity: Number(order.quantity || 1), price: Number(order.customerPriceMinor || 0) / 100 / Math.max(1, Number(order.quantity || 1)) }] }} /></> : null}
+      {notice === "order-created" ? <><AnalyticsEvent event="order_success" parameters={{ service_id: order.serviceId ? publicServiceId(String(order.serviceId)) : "unknown" }} deduplicationKey={`order_success:${id}`} /><AnalyticsEvent event="purchase" deduplicationKey={`purchase:${id}`} parameters={{ transaction_id: id, currency: String(order.currency || "NGN"), value: Number(order.customerPriceMinor || 0) / 100, items: [{ item_id: order.serviceId ? publicServiceId(String(order.serviceId)) : "unknown", item_name: String(order.serviceName || "Social media service"), item_category: String(order.serviceCategory || "Social media service"), quantity: Number(order.quantity || 1), price: Number(order.customerPriceMinor || 0) / 100 / Math.max(1, Number(order.quantity || 1)) }] }} /></> : null}
+      {Number(order.refundedAmountMinor || 0) > 0 ? <AnalyticsEvent event="refund" deduplicationKey={`refund:${id}:${Number(order.refundedAmountMinor)}`} parameters={{ transaction_id: id, currency: String(order.currency || "NGN"), value: Number(order.refundedAmountMinor) / 100 }} /> : null}
       {notice === "order-created" ? (
         <Toast
           kind="success"
           title="Order submitted"
           message="Your order was created successfully. Progress will appear as soon as processing begins."
         />
+      ) : notice === "order-review" ? (
+        <Toast kind="info" title="Order confirmation in progress" message="Your order is recorded and protected from duplicate submission while confirmation completes." />
       ) : notice === "cancellation-pending" ? (
         <Toast kind="success" title="Cancellation request submitted" message="The request was sent for processing. The order remains active until its live status confirms cancellation." />
       ) : notice === "cancellation-review" ? (
@@ -178,7 +181,7 @@ export default async function OrderPage({
         <p className="muted">Target link</p>
         <p style={{ overflowWrap: "anywhere" }}>{order.link}</p>
         <p className="muted">
-          Order reference: {order.providerOrderId || "Awaiting confirmation"}
+          Order reference: #{id.slice(0, 8)}
         </p>
         <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
           {order.refillSupported && order.status === "completed" ? (

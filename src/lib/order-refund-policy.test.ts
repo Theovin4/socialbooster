@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { REFUND_CONFIRMATION_DELAY_MS, terminalRefundDecision } from "./order-refund-policy";
+import { REFUND_CONFIRMATION_DELAY_MS, remainingRefundAmount, terminalRefundDecision } from "./order-refund-policy";
 
 describe("terminal refund confirmation", () => {
   const now = 1_000_000;
@@ -10,4 +10,11 @@ describe("terminal refund confirmation", () => {
   it("rejects malformed partial evidence", () => expect(terminalRefundDecision({ status: "partial", quantity: 1000, remains: 1000, nowMs: now })).toBe("reject"));
   it("rejects a full-refund status without a fully undelivered quantity", () => expect(terminalRefundDecision({ status: "failed", quantity: 1000, remains: null, nowMs: now })).toBe("reject"));
   it("confirms a valid partial result", () => expect(terminalRefundDecision({ status: "partial", quantity: 1000, remains: 250, previousObservation: "partial", firstObservedAtMs: now - REFUND_CONFIRMATION_DELAY_MS, nowMs: now })).toBe("confirm"));
+});
+
+describe("cross-source refund protection", () => {
+  it("only permits the unrefunded portion and never exceeds the charge", () => {
+    expect(remainingRefundAmount(10_000, [2_500])).toBe(7_500);
+    expect(remainingRefundAmount(10_000, [6_000, 6_000])).toBe(0);
+  });
 });

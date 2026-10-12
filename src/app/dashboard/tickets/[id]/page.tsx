@@ -2,6 +2,7 @@ import Link from "next/link";
 import { notFound } from "next/navigation";
 import { AppShell } from "@/components/app-shell";
 import { Toast } from "@/components/toast";
+import { AnalyticsEvent } from "@/components/analytics-event";
 import { adminDb } from "@/lib/firebase/admin";
 import { requireUser } from "@/lib/firebase/session";
 import { replyToSupportTicket, setCustomerTicketStatus } from "../../support/actions";
@@ -22,6 +23,7 @@ export default async function TicketPage({ params, searchParams }: { params: Pro
   const closed = ticket.get("status") === "closed";
   const orderId = String(ticket.get("orderId") || "");
   return <AppShell>
+    {notice === "created" ? <AnalyticsEvent event="support_ticket_created" deduplicationKey={`support_ticket_created:${id}`} /> : null}
     {notice === "created" ? <Toast kind="success" title="Conversation started" message="Your support request and files were received securely." /> : null}
     {notice === "replied" ? <Toast kind="success" title="Reply sent" message="Your reply was added to this conversation." /> : null}
     {notice === "closed" ? <Toast kind="success" title="Conversation closed" message="You can reopen it if you need more help." /> : null}

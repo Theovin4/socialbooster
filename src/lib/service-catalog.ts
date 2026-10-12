@@ -9,6 +9,7 @@ import {
   type PublicCatalogSnapshotDescriptor,
   type PublicCatalogSnapshotItem,
 } from "./public-catalog-snapshot";
+import { choosePreferredDuplicateServices, rankFeaturedServices } from "./service-quality";
 
 export { publicServiceId } from "./service-public-id";
 
@@ -91,11 +92,18 @@ export async function getActiveServiceCatalog(): Promise<CachedService[]> {
   const providers = providerDefinitions().filter((provider) => provider.configured).map((provider) => provider.key);
   if (!providers.length) return [];
   const snapshots = await Promise.all(providers.map(loadProviderCatalog));
-  return snapshots
+  return choosePreferredDuplicateServices(snapshots
     .flat()
     .filter((item) => item.active !== false)
-    .map((item) => ({ ...item, updatedAt: item.updatedAt || null }))
+    .map((item) => ({ ...item, updatedAt: item.updatedAt || null })))
     .sort((a, b) => a.category.localeCompare(b.category) || a.name.localeCompare(b.name));
+}
+
+/** Curates platform examples from the eligible cached catalogue, not provider row order. */
+export async function getFeaturedServices(query: string, limit = 6) {
+  const normalized = query.trim().toLocaleLowerCase("en");
+  const matches = (await getActiveServiceCatalog()).filter((service) => `${service.name} ${service.category}`.toLocaleLowerCase("en").includes(normalized));
+  return rankFeaturedServices(matches).slice(0, Math.max(1, Math.min(20, Math.floor(limit))));
 }
 
 /**

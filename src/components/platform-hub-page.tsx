@@ -2,12 +2,11 @@ import Link from "next/link";
 import { SiteFooter } from "./site-footer";
 import { SiteHeader } from "./site-header";
 import { formatMoney } from "@/lib/money";
-import { getServiceCatalogPage } from "@/lib/service-catalog";
+import { getFeaturedServices } from "@/lib/service-catalog";
 import type { PlatformHub } from "@/lib/platform-hubs";
 
 export async function PlatformHubPage({ hub }: { hub: PlatformHub }) {
-  const result = await getServiceCatalogPage({ query: hub.name, page: 1, pageSize: 10 }).catch(() => null);
-  const examples = result?.items.slice(0, 6) || [];
+  const examples = await getFeaturedServices(hub.name, 6).catch(() => []);
   const siteUrl = "https://www.socialbooster.net.ng";
   const faq = [
     { question: `How do I choose a ${hub.name} service?`, answer: "Compare the service name, order limits, price and support options. Open the detail page and follow its link requirements before ordering." },

@@ -14,6 +14,12 @@ type RefundDecisionInput = {
 
 export type RefundDecision = "none" | "stage" | "hold" | "confirm" | "reject";
 
+export function remainingRefundAmount(originalChargeMinor: number, previousRefundsMinor: number[]) {
+  if (!Number.isSafeInteger(originalChargeMinor) || originalChargeMinor <= 0) throw new Error("Invalid original charge");
+  const refunded = previousRefundsMinor.reduce((sum, amount) => sum + (Number.isSafeInteger(amount) && amount > 0 ? amount : 0), 0);
+  return Math.max(0, originalChargeMinor - Math.min(originalChargeMinor, refunded));
+}
+
 /** A terminal provider response must be valid and persist across two checks. */
 export function terminalRefundDecision(input: RefundDecisionInput): RefundDecision {
   if (!terminalStatuses.has(input.status)) return "none";

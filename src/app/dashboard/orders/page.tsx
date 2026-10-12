@@ -51,10 +51,10 @@ function progress(quantity: unknown, remains: unknown, status: unknown) {
 export default async function OrdersPage({
   searchParams,
 }: {
-  searchParams: Promise<{ status?: string; q?: string; refresh?: string; after?: string }>;
+  searchParams: Promise<{ status?: string; q?: string; refresh?: string; after?: string; submitted?: string; attention?: string; failed?: string }>;
 }) {
   const user = await requireUser();
-  const { status = "all", q = "", refresh, after } = await searchParams;
+  const { status = "all", q = "", refresh, after, submitted, attention, failed } = await searchParams;
   let refreshFailed = false;
   let query: FirebaseFirestore.Query = adminDb().collection("orders").where("userId", "==", user.uid);
   if (filters.includes(status) && status !== "all") query = query.where("status", "==", status);
@@ -89,6 +89,7 @@ export default async function OrdersPage({
 
   return (
     <AppShell>
+      {submitted || failed ? <Toast kind={Number(attention || 0) > 0 || Number(failed || 0) > 0 ? "info" : "success"} title={`${submitted || 0} batch order${submitted === "1" ? "" : "s"} recorded`} message={Number(failed || 0) > 0 ? `${failed} row${failed === "1" ? "" : "s"} could not be submitted and were not charged. ${attention || 0} recorded order${attention === "1" ? "" : "s"} need confirmation.` : Number(attention || 0) > 0 ? `${attention} order${attention === "1" ? "" : "s"} need confirmation; no duplicate charge will be created.` : "Each order passed validation and was submitted safely."} /> : null}
       {refreshFailed ? (
         <Toast
           kind="info"

@@ -5,6 +5,7 @@ import { isProviderKey, type ProviderKey } from "@/lib/providers";
 import { FieldPath } from "firebase-admin/firestore";
 import Link from "next/link";
 import { approveService, setServiceGovernance, setServicePriceOverride, syncAllServices } from "./actions";
+import { evaluateServiceQuality } from "@/lib/service-quality";
 
 export const dynamic = "force-dynamic";
 export const maxDuration = 60;
@@ -86,6 +87,7 @@ export default async function AdminServices({ searchParams }: { searchParams: Pr
             const provider = doc.data;
             const local = result.approvedMap.get(doc.id);
             const active = local?.active === true;
+            const quality = evaluateServiceQuality({ name: String(provider.rawName || provider.name || ""), category: String(provider.categoryName || ""), min: Number(provider.minQuantity), max: Number(provider.maxQuantity), rateMinor: BigInt(Number(provider.providerRateNgnMinor || provider.providerRateMinor || 0)), sellingRateMinor: BigInt(Number(provider.sellingRateMinor || 0)), providerFunded: true, type: String(provider.type || ""), refill: provider.refillSupported === true, cancel: provider.cancelSupported === true });
             return (
               <article className="glass card" key={doc.id} style={{ display: "grid", gridTemplateColumns: "1fr auto", gap: 20, alignItems: "center" }}>
                 <div>
@@ -93,7 +95,7 @@ export default async function AdminServices({ searchParams }: { searchParams: Pr
                   <h2 style={{ fontSize: 18, margin: "8px 0" }}>{provider.name}</h2>
                   {local?.publicName ? <p style={{ margin: "0 0 8px" }}><strong>Public name:</strong> {String(local.publicName)}</p> : null}
                   <p className="muted" style={{ margin: 0 }}>{provider.providerLabel || "Followpanel"} · ID {provider.providerServiceId || doc.id} · Cost {provider.providerCurrency || "NGN"} {provider.rateText}/1,000 · Min {provider.minQuantity} · Max {provider.maxQuantity} · Refill {provider.refillSupported ? "Yes" : "No"} · Cancel {provider.cancelSupported ? "Yes" : "No"}</p>
-                  {local ? <p className="muted" style={{ margin: "8px 0 0" }}>Public: {active ? "Published" : "Hidden"} · Featured: {local.featured ? "Yes" : "No"} · Search index: {local.seoEligible ? "Approved" : "Noindex"} · Ads: {local.paidAdsEligible ? "Eligible" : "Not approved"} · Review flag: {local.flaggedForReview ? "Yes" : "No"}</p> : null}
+                  {local ? <><p className="muted" style={{ margin: "8px 0 0" }}>Public: {active ? "Published" : "Hidden"} · Featured: {local.featured ? "Yes" : "No"} · Search index: {local.seoEligible ? "Approved" : "Noindex"} · Ads: {local.paidAdsEligible ? "Eligible" : "Not approved"} · Review flag: {local.flaggedForReview ? "Yes" : "No"}</p><p className="muted" style={{ margin: "8px 0 0" }}>Price check: {String(local.priceStatus || quality.priceStatus).replaceAll("_", " ")} · Compliance: {String(local.complianceStatus || quality.complianceStatus).replaceAll("_", " ")} · Public category: {quality.normalizedCategory} · Duplicate group: {String(local.duplicateGroupKey || quality.duplicateGroupKey).slice(0, 42)}</p>{quality.hiddenReasons.length ? <small style={{ color: "#fbbf24" }}>Hidden reasons: {quality.hiddenReasons.join(", ").replaceAll("_", " ")}</small> : null}</> : null}
                 </div>
                 {local ? (
                   <div style={{ display: "grid", gap: 8, minWidth: 210 }}>

@@ -1,6 +1,6 @@
 import { z } from "zod";
 import { adminDb } from "@/lib/firebase/admin";
-import { postWallet } from "@/lib/firebase/wallet";
+import { creditVerifiedPayment } from "@/lib/payments/credit";
 import { verifyPayPalWebhook } from "@/lib/payments/paypal";
 import { decimalToMinor } from "@/lib/money";
 
@@ -12,12 +12,11 @@ export async function POST(request: Request) {
   if (event.event_type !== "PAYMENT.CAPTURE.COMPLETED") { await db.collection("paymentEvents").doc(`paypal:${event.id}`).set({ provider:"paypal",eventType:event.event_type,status:"reviewed",receivedAt:new Date() },{merge:true}); if(event.event_type.includes("REFUND")||event.event_type.includes("REVERSED"))await db.collection("fraudAlerts").doc(`paypal:${event.id}`).set({type:"payment_reversal",provider:"paypal",providerTransactionId:event.resource.id,status:"open",createdAt:new Date()},{merge:true}); return Response.json({ received: true }); }
   const reference = event.resource.custom_id || event.resource.supplementary_data?.related_ids.order_id;
   if (!reference || !event.resource.amount) return Response.json({ error: "Missing payment reference" }, { status: 400 });
-  const intentRef = db.collection("paymentIntents").doc(reference), intent = await intentRef.get();
+  const intent = await db.collection("paymentIntents").doc(reference).get();
   if (!intent.exists) return Response.json({ error: "Unknown payment reference" }, { status: 400 });
   const expected = intent.data()!, amountMinor = Number(decimalToMinor(event.resource.amount.value));
-  if (amountMinor !== expected.amountMinor || event.resource.amount.currency_code !== expected.currency) return Response.json({ error: "Payment details do not match" }, { status: 400 });
-  await postWallet({ userId: expected.userId, type: "deposit", deltaMinor: expected.amountMinor, currency: expected.currency, idempotencyKey: `paypal:${event.resource.id}`, reference });
-  await intentRef.set({ status: "paid", providerTransactionId: event.resource.id, verifiedAt: new Date() }, { merge: true });
+  if (expected.provider !== "paypal" || amountMinor !== expected.amountMinor || event.resource.amount.currency_code !== expected.currency) return Response.json({ error: "Payment details do not match" }, { status: 400 });
+  await creditVerifiedPayment({ provider: "paypal", reference, providerTransactionId: event.resource.id, amountMinor, currency: event.resource.amount.currency_code });
   await db.collection("paymentEvents").doc(`paypal:${event.id}`).set({provider:"paypal",eventType:event.event_type,reference,providerTransactionId:event.resource.id,status:"processed",receivedAt:new Date()},{merge:true});
   return Response.json({ received: true });
 }
