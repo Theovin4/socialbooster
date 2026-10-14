@@ -9,6 +9,7 @@ import { getProvider, normalizeProviderKey } from "./providers";
 import { sendAdminAlert, sendUserEmail } from "./email";
 import { recordNewOrder } from "./firebase/stats";
 import { recordFinanceOrderCreated, recordWalletRollup } from "./firebase/analytics-rollups";
+import { assertServiceOrderEligible, ServiceUnavailableError } from "./service-quality";
 
 export type NewOrder = { userId: string; serviceId: string; link: string; quantity: number; idempotencyKey: string };
 export async function createAndSubmitOrder(input: NewOrder) {
@@ -19,8 +20,9 @@ export async function createAndSubmitOrder(input: NewOrder) {
   const local = await db.runTransaction(async (transaction) => {
     const [existing, wallet, service] = await Promise.all([transaction.get(orderRef), transaction.get(walletRef), transaction.get(serviceRef)]);
     if (existing.exists) return existing.data()!;
-    if (!service.exists || service.get("active") !== true || service.get("publicEligibility") === "hidden" || ["PRICE_REVIEW", "PRICE_ANOMALY"].includes(String(service.get("priceStatus") || "NORMAL")) || ["REVIEW_REQUIRED", "PUBLIC_HIDDEN", "PROHIBITED"].includes(String(service.get("complianceStatus") || "APPROVED"))) throw new Error("Service is unavailable");
+    if (!service.exists) throw new ServiceUnavailableError();
     const data = service.data()!;
+    assertServiceOrderEligible(data);
     if (input.quantity < data.minQuantity || input.quantity > data.maxQuantity) throw new Error("Quantity is outside service limits");
     const providerCostMinor = Number(serviceCostMinor(BigInt(data.providerRateMinor), BigInt(input.quantity)));
     const convertedProviderCostMinor = providerCostMinor;

@@ -10,7 +10,7 @@ import { publicServiceId } from "./service-public-id";
 import { PUBLIC_CATALOG_SNAPSHOT_CHUNK_SIZE, readPublicCatalogSnapshot, writePublicCatalogSnapshot, type PublicCatalogSnapshotItem } from "./public-catalog-snapshot";
 
 const FINGERPRINT_VERSION = 1;
-const QUALITY_RULESET_VERSION = 2;
+const QUALITY_RULESET_VERSION = 3;
 const FINGERPRINT_CHUNK_SIZE = 500;
 const MANUAL_SYNC_COOLDOWN_MS = 5 * 60 * 1000;
 const SYNC_LOCK_MS = 10 * 60 * 1000;
@@ -175,8 +175,10 @@ export async function synchronizeProviderServices(providerKey: ProviderDefinitio
     const qualitySummary = {
       publicEligible: [...qualityById.values()].filter((quality) => quality.publicEligible).length,
       hiddenAnomalies: [...qualityById.values()].filter((quality) => quality.priceStatus !== "NORMAL").length,
+      nonServiceRecords: [...qualityById.values()].filter((quality) => quality.reasonCodes.includes("NON_SERVICE_RECORD")).length,
+      unmappedCategories: [...qualityById.values()].filter((quality) => quality.reasonCodes.includes("UNMAPPED_CATEGORY")).length,
       complianceHidden: [...qualityById.values()].filter((quality) => quality.complianceStatus !== "APPROVED").length,
-      malformedNames: [...qualityById.values()].filter((quality) => quality.hiddenReasons.includes("invalid_service_name") || quality.hiddenReasons.includes("instruction_row")).length,
+      malformedNames: [...qualityById.values()].filter((quality) => quality.reasonCodes.includes("MALFORMED_NAME") || quality.reasonCodes.includes("INVALID_SERVICE_NAME") || quality.reasonCodes.includes("INSTRUCTION_ROW")).length,
       providerLabelsRemoved: rows.filter((item) => /\b(?:followspanel|follows\s*panel|nitro\s*(?:ng)?|smm\s*world)\b/i.test(item.name)).length,
       duplicateGroups: [...duplicateCounts.values()].filter((count) => count > 1).length,
     };
@@ -204,7 +206,7 @@ export async function synchronizeProviderServices(providerKey: ProviderDefinitio
       const quality = qualityById.get(row.id)!;
       const old = publicMap.get(row.id), visibilityOverride = stored?.visibilityOverride === "show" || stored?.visibilityOverride === "hide" ? stored.visibilityOverride : null;
       const active = quality.publicEligible && visibilityOverride !== "hide" && (visibilityOverride === "show" || old?.active !== false);
-      if (!quality.publicEligible && !old) return null;
+      if (!quality.publicEligible) return null;
       const name = typeof stored?.publicNameOverride === "string" && stored.publicNameOverride.trim() ? stored.publicNameOverride.trim().slice(0, 140) : quality.publicName;
       return { id: publicServiceId(row.id), internalId: row.id, name, category: quality.normalizedCategory, type: row.item.type, description: safeDescription(row.providerData.description, name, quality.normalizedCategory), min: row.item.min, max: row.item.max, refill: row.item.refill, cancel: row.item.cancel, rateMinor: Number(sellingRateMinor), updatedAt: new Date().toISOString(), seoEligible: quality.publicEligible && (stored?.seoEligibilityOverride === "index" || old?.seoEligible === true), featured: quality.publicEligible && (stored?.featured === true || old?.featured === true), paidAdsEligible: quality.publicEligible && (stored?.paidAdsEligible === true || old?.paidAdsEligible === true), active };
     };
@@ -224,7 +226,7 @@ export async function synchronizeProviderServices(providerKey: ProviderDefinitio
         const visibilityOverride = stored?.visibilityOverride === "show" || stored?.visibilityOverride === "hide" ? stored.visibilityOverride : null;
         const active = quality.publicEligible && visibilityOverride !== "hide";
         const publicName = typeof stored?.publicNameOverride === "string" && stored.publicNameOverride.trim() ? stored.publicNameOverride.trim().slice(0, 140) : quality.publicName;
-        const customerData = { ...row.providerData, rawName: row.item.name, publicName, categoryName: quality.normalizedCategory, publicStatus: active ? "published" : quality.complianceStatus === "REVIEW_REQUIRED" || quality.priceStatus === "PRICE_REVIEW" ? "review" : "hidden", publicEligibility: quality.publicEligible ? "eligible" : "hidden", hiddenReasons: quality.hiddenReasons, priceStatus: quality.priceStatus, complianceStatus: quality.complianceStatus, duplicateGroupKey: quality.duplicateGroupKey, featured: quality.publicEligible && stored?.featured === true, flaggedForReview: quality.complianceStatus === "REVIEW_REQUIRED" || quality.priceStatus === "PRICE_REVIEW" || stored?.flaggedForReview === true, paidAdsEligible: quality.publicEligible && stored?.paidAdsEligible === true, seoEligible: quality.publicEligible && stored?.seoEligibilityOverride === "index" };
+        const customerData = { ...row.providerData, rawName: row.item.name, rawCategoryName: row.item.category, publicName, categoryName: quality.normalizedCategory, publicStatus: active ? "published" : quality.complianceStatus === "REVIEW_REQUIRED" || quality.priceStatus === "PRICE_REVIEW" ? "review" : "hidden", publicEligibility: quality.publicEligible ? "eligible" : "hidden", reasonCodes: quality.reasonCodes, hiddenReasons: quality.hiddenReasons, priceStatus: quality.priceStatus, complianceStatus: quality.complianceStatus, duplicateGroupKey: quality.duplicateGroupKey, featured: quality.publicEligible && stored?.featured === true, flaggedForReview: quality.complianceStatus === "REVIEW_REQUIRED" || quality.priceStatus === "PRICE_REVIEW" || stored?.flaggedForReview === true, paidAdsEligible: quality.publicEligible && stored?.paidAdsEligible === true, seoEligible: quality.publicEligible && stored?.seoEligibilityOverride === "index" };
         const pricingFingerprint = hashRecord({ ...customerData, providerRateNgnMinor: String(row.providerRateNgnMinor), grossMarginTargetBps: Number(grossMarginTargetBps), active });
         writer.set(db.collection("providerServices").doc(id), { ...row.providerData, syncFingerprint: row.fingerprint, lastSyncedAt: FieldValue.serverTimestamp() }, { merge: true });
         writer.set(db.collection("services").doc(id), { ...customerData, providerNativeRateMinor: Number(row.nativeRateMinor), providerRateMinor: Number(row.providerRateNgnMinor), providerRateNgnMinor: Number(row.providerRateNgnMinor), sellingCurrency: "NGN", sellingRateMinor: Number(sellingRateMinor), pricingModel: "ngn_gross_margin_v2", pricingFingerprint, grossMarginTargetBps: Number(grossMarginTargetBps), grossMarginBps: Number(grossMarginBps(row.providerRateNgnMinor, sellingRateMinor)), markupBps: Number(markupBps(row.providerRateNgnMinor, sellingRateMinor)), active, autoImported: true, customSellingRateMinor: FieldValue.delete(), marginBps: FieldValue.delete(), updatedAt: FieldValue.serverTimestamp(), ...(stored ? {} : { createdAt: FieldValue.serverTimestamp() }) }, { merge: true });

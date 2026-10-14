@@ -9,7 +9,7 @@ import {
   type PublicCatalogSnapshotDescriptor,
   type PublicCatalogSnapshotItem,
 } from "./public-catalog-snapshot";
-import { choosePreferredDuplicateServices, rankFeaturedServices } from "./service-quality";
+import { choosePreferredDuplicateServices, rankFeaturedServices, sanitizePublicCatalogCandidate } from "./service-quality";
 
 export { publicServiceId } from "./service-public-id";
 
@@ -94,7 +94,8 @@ export async function getActiveServiceCatalog(): Promise<CachedService[]> {
   const snapshots = await Promise.all(providers.map(loadProviderCatalog));
   return choosePreferredDuplicateServices(snapshots
     .flat()
-    .filter((item) => item.active !== false)
+    .map(sanitizePublicCatalogCandidate)
+    .filter((item): item is PublicCatalogSnapshotItem => item !== null)
     .map((item) => ({ ...item, updatedAt: item.updatedAt || null })))
     .sort((a, b) => a.category.localeCompare(b.category) || a.name.localeCompare(b.name));
 }
@@ -140,7 +141,7 @@ async function buildServiceCatalogPage(input: ServiceCatalogPageInput): Promise<
 const getCachedServiceCatalogPage = unstable_cache(
   async (query: string, category: string, page: number, pageSize: number, selectedId: string) =>
     buildServiceCatalogPage({ query, category, page, pageSize, selectedId }),
-  ["active-service-catalog-v8-page"],
+  ["active-service-catalog-v9-page"],
   { revalidate: 86_400, tags: [SERVICE_CATALOG_TAG] },
 );
 

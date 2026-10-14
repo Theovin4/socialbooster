@@ -27,4 +27,22 @@ describe("Firebase optimization architecture", () => {
     expect(page).toContain("resolveServiceIdentifier");
     expect(page).not.toContain("adminDb");
   });
+
+  it("forces a bounded snapshot rebuild when catalogue quality rules change", () => {
+    const sync = readFileSync(new URL("./services-sync.ts", import.meta.url), "utf8");
+    expect(sync).toContain("QUALITY_RULESET_VERSION = 3");
+    expect(sync).toContain("qualityMigration");
+    expect(sync).not.toContain("if (!quality.publicEligible && !old) return null");
+  });
+
+  it("revalidates API and mass-order service IDs before wallet debit", () => {
+    const api = readFileSync(new URL("../app/api/v2/route.ts", import.meta.url), "utf8");
+    const mass = readFileSync(new URL("../app/dashboard/orders/actions.ts", import.meta.url), "utf8");
+    const orders = readFileSync(new URL("./orders.ts", import.meta.url), "utf8");
+    expect(api).toContain("resolveServiceIdentifier");
+    expect(api).toContain("createAndSubmitOrder");
+    expect(mass).toContain("resolveServiceIdentifier");
+    expect(mass).toContain("createAndSubmitOrder");
+    expect(orders.indexOf("assertServiceOrderEligible(data)")).toBeLessThan(orders.indexOf("transaction.set(walletRef"));
+  });
 });

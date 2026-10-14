@@ -5,6 +5,7 @@ import { adminDb } from "@/lib/firebase/admin";
 import { createAndSubmitOrder } from "@/lib/orders";
 import { customerOrderStatusLabel } from "@/lib/customer-order-status";
 import { getActiveServiceCatalog, resolveServiceIdentifier } from "@/lib/service-catalog";
+import { ServiceUnavailableError } from "@/lib/service-quality";
 
 export const dynamic = "force-dynamic";
 const addSchema = z.object({ service: z.coerce.string().min(3).max(160), link: z.string().url().max(2048), quantity: z.coerce.number().int().positive(), idempotency_key: z.string().regex(/^[A-Za-z0-9_-]{8,80}$/).optional() });
@@ -47,6 +48,7 @@ export async function POST(request: Request) {
     throw new CustomerApiError("Unsupported action", 400, "unsupported_action");
   } catch (error) {
     if (error instanceof CustomerApiError) return Response.json({ error: error.message, code: error.code }, { status: error.status });
+    if (error instanceof ServiceUnavailableError) return Response.json({ error: error.message, code: "service_unavailable" }, { status: 409 });
     if (error instanceof z.ZodError) return Response.json({ error: "Invalid request", code: "invalid_request", details: error.issues.map((issue) => ({ field: issue.path.join("."), message: issue.message })) }, { status: 400 });
     console.error("[customer-api] request failed", { error: error instanceof Error ? error.message : String(error) });
     return Response.json({ error: "Request could not be completed", code: "internal_error" }, { status: 500 });
