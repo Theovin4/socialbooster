@@ -23,7 +23,7 @@ No deployment, provider synchronization, order, refill, wallet mutation, custome
 
 ## Catalogue-safety continuation
 
-The recovered baseline commit remains `85fff98cefe4dfed2d150a697b732ced16dcf5e5`. The current working candidate is a small catalogue-sanitization patch based on that commit; record its final commit hash from `git log -1 --oneline` after the verified commit is created.
+The recovered baseline commit is `85fff98cefe4dfed2d150a697b732ced16dcf5e5`. The verified catalogue-safety application release is commit `d4d96e4b67a462572e91be493b5c7a47272ae73f` (`Harden public catalogue eligibility`), pushed to `origin/main`. Vercel production deployment `dpl_3yjX85EJV2Mz5Dojhe8HZyMrm54k` reached `READY` and serves the canonical production aliases.
 
 The patch strengthens the existing shared service-quality engine rather than creating page-specific filters. It now returns an eligibility decision, stable reason codes, normalized public name/category, pricing status, and compliance status. The same engine is used during provider synchronization, as a zero-additional-read guard when cached public snapshot rows are loaded, and inside the authoritative order transaction before any wallet debit. Consequently, public catalogue/search/pricing/platform/API consumers share one filtered catalogue, while direct web, API, and mass-order IDs are independently revalidated at order time.
 
@@ -53,7 +53,9 @@ Catalogue quality ruleset version `3` deliberately forces one bounded snapshot r
 | Secret scan | No private-key or common live-token patterns found in tracked files |
 | Diff check | Passed; no whitespace errors |
 
-No real payment, wallet mutation, order, refill, cancellation, provider submission, or customer-data write was used for verification. The authorized post-deployment catalogue synchronization must run only after the Git/Vercel deployment is healthy; its result and live catalogue counts should be captured in the final release report.
+No real payment, wallet mutation, order, refill, cancellation, provider submission, or customer-data write was used for verification. Cache-busted production checks returned HTTP 200 for `/services`, `/instagram`, `/tiktok`, `/facebook`, `/youtube`, `/telegram`, and `/pricing`. The public catalogue exposes 2,306 sanitized services, contains no confirmed bad IDs or `AUDIOMACK SERVICES` header, uses canonical Apple Music/Audiomack labels, and returns HTTP 404 for `SB-C7D93610323AB12F`, `SB-E81A8E853537640E`, and `SB-9019C6D80C351B5D`.
+
+The ruleset-3 snapshot republish was not manually triggered. The protected production credential is stored as a Vercel Secret and is intentionally not retrievable through the scoped CLI/API paths available to this session; the rejected attempts returned `401` and performed no sync. Pulling the entire production environment was blocked because it would unnecessarily expose unrelated payment, Firebase, email, and provider secrets. The deployed zero-read snapshot guard provides immediate public/order safety, and the existing Vercel cron will run `/api/cron/services` at `23:00 UTC`; its provider inventory and per-reason quality counts remain the next observation task.
 
 ## Current architecture
 
