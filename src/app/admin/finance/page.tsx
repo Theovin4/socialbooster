@@ -3,13 +3,19 @@ import { AppShell } from "@/components/app-shell";
 import { requireAdmin } from "@/lib/firebase/session";
 import { loadFinanceDashboardData } from "@/lib/finance-data";
 import { formatMoney } from "@/lib/money";
+import { Toast } from "@/components/toast";
+import { rebuildFinanceAction, reconcileFinanceAction } from "./actions";
 
 export const dynamic = "force-dynamic";
+export const maxDuration = 300;
 const statuses = [
   "all",
+  "submitting",
+  "provider_confirmation_required",
   "pending",
   "processing",
   "in_progress",
+  "cancel_requested",
   "completed",
   "partial",
   "cancelled",
@@ -26,6 +32,7 @@ export default async function FinancePage({
     from?: string;
     to?: string;
     status?: string;
+    repair?: string;
   }>;
 }) {
   await requireAdmin();
@@ -34,9 +41,8 @@ export default async function FinancePage({
     status = filters.status || "all";
   const data = await loadFinanceDashboardData({ ...filters, range, status });
   const summary = data.summary;
-  const ordersAvailable = true;
-  const transactionsAvailable = true;
-  const walletAvailable = true;
+  const rollupsAvailable = data.availability.rollups && summary !== null;
+  const ordersAvailable = data.availability.recentOrders;
   const byDay = new Map<string, number>();
   for (const row of data.daily) {
     const key = String(row.dateKey || "");
@@ -57,7 +63,9 @@ export default async function FinancePage({
       orders: 0,
     };
     current.sales += order.customerPriceMinor;
-    current.cost += order.providerCostMinor;
+    current.cost += order.providerAccepted || Number.isInteger(order.providerOrderId)
+      ? order.providerCostIncurredMinor ?? order.providerCostMinor
+      : 0;
     current.orders += 1;
     byCategory.set(order.category, current);
   }
@@ -72,26 +80,41 @@ export default async function FinancePage({
   }).toString();
   const cards: Array<[string, number | null]> = [
     [
-      "Customer deposits",
-      transactionsAvailable ? summary.depositsMinor : null,
+      "Verified customer deposits",
+      rollupsAvailable ? summary?.depositsMinor ?? null : null,
     ],
-    ["Order value", ordersAvailable ? summary.orderValueMinor : null],
-    ["Net sales", ordersAvailable && transactionsAvailable ? summary.netSalesMinor : null],
+    ["Order value", rollupsAvailable ? summary?.orderValueMinor ?? null : null],
+    ["Net sales", rollupsAvailable ? summary?.netSalesMinor ?? null : null],
     [
       "Capital deployed",
-      ordersAvailable ? summary.capitalDeployedMinor : null,
+      rollupsAvailable ? summary?.capitalDeployedMinor ?? null : null,
     ],
     [
       "Gross profit",
-      ordersAvailable && transactionsAvailable ? summary.grossProfitMinor : null,
+      rollupsAvailable ? summary?.grossProfitMinor ?? null : null,
     ],
     [
-      "Wallet liability",
-      walletAvailable ? summary.walletLiabilityMinor : null,
+      "Current NGN wallet liability",
+      rollupsAvailable ? summary?.walletLiabilityMinor ?? null : null,
     ],
   ];
+  const healthLabel = data.health.available
+    ? data.health.lastReconciliationStatus === "MATCH" ? "Finance data healthy" : "Finance reconciliation required"
+    : "Finance rollup rebuild required";
+  const definitions: Record<string, string> = {
+    "Verified customer deposits": "Successfully verified customer wallet funding. This is cash inflow, not revenue.",
+    "Order value": "Customer order charges before refunds.",
+    "Net sales": "Order charges less customer order refunds.",
+    "Capital deployed": "Provider cost actually incurred on provider-accepted orders.",
+    "Gross profit": "Net sales less provider costs incurred. Excludes payment fees, tax and other operating expenses.",
+    "Current NGN wallet liability": "Total unused NGN customer wallet funds currently owed to customers.",
+  };
   return (
     <AppShell admin>
+      {filters.repair === "rebuilt" ? <Toast type="success" title="Finance rollups rebuilt" message="Historical daily data and global totals were reconstructed from authoritative records." /> : null}
+      {filters.repair === "matched" ? <Toast type="success" title="Finance reconciliation matched" message="Trusted rollups agree with the authoritative aggregates." /> : null}
+      {filters.repair === "drift" ? <Toast type="error" title="Finance drift detected" message="No values were overwritten. Run the controlled rebuild after reviewing the reconciliation details." /> : null}
+      {filters.repair?.endsWith("failed") ? <Toast type="error" title="Finance operation failed" message="No financial ledger entries were changed. Review the server logs before retrying." /> : null}
       <div className="section-head">
         <div>
           <h1 className="page-heading">Finance</h1>
@@ -149,10 +172,20 @@ export default async function FinancePage({
           Reset
         </Link>
       </form>
-      <div className="notice" style={{ marginTop: 18 }}><strong>Quota-safe reporting active</strong><p className="muted" style={{ marginBottom: 0 }}>Totals come from compact finance rollups. The table below is limited to the latest 25 matching orders; downloadable reports remain available on demand.</p></div>
+      <div className="notice" style={{ marginTop: 18 }}>
+        <div className="section-head">
+          <div><strong>{healthLabel}</strong><p className="muted" style={{ marginBottom: 0 }}>Rollup version {data.health.financeRollupVersion ?? "unavailable"} · Historical backfill {data.health.historicalBackfillComplete ? "complete" : "required"} · Last reconciled {data.health.lastReconciledAt?.toLocaleString("en-NG", { timeZone: "Africa/Lagos" }) || "not yet"}.</p></div>
+          <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
+            <form action={reconcileFinanceAction}><button className="btn" type="submit">Run reconciliation</button></form>
+            <form action={rebuildFinanceAction}><button className="btn" type="submit">Rebuild trusted rollups</button></form>
+          </div>
+        </div>
+        <p className="muted" style={{ marginBottom: 0 }}>Normal reporting reads compact monthly rollups plus at most 25 recent matching orders. Rebuild and reconciliation run only when an administrator explicitly requests them.</p>
+      </div>
+      {status !== "all" ? <div className="notice" style={{ marginTop: 12 }}><strong>Status-filtered order metrics</strong><p className="muted" style={{ marginBottom: 0 }}>Order value, refunds, net sales, provider cost, profit, order count and trend reflect {status.replaceAll("_", " ")} orders. Verified deposits and current wallet liability remain global because they do not belong to an order status.</p></div> : null}
       <div className="finance-kpis">
         {cards.map(([label, value]) => (
-          <article className="glass card stat-card" key={label}>
+          <article className="glass card stat-card" key={label} title={definitions[label]}>
             <span className="muted">{label}</span>
             <strong className="stat-value finance-value">{value === null ? "Unavailable" : money(value)}</strong>
           </article>
@@ -161,23 +194,23 @@ export default async function FinancePage({
       <div className="finance-kpis compact">
         <article className="glass card">
           <span className="muted">Gross margin</span>
-          <strong>{ordersAvailable && transactionsAvailable ? `${(summary.grossMarginBps / 100).toFixed(1)}%` : "Unavailable"}</strong>
+          <strong>{rollupsAvailable ? summary?.grossMarginBps === null ? "N/A" : `${((summary?.grossMarginBps || 0) / 100).toFixed(1)}%` : "Unavailable"}</strong>
         </article>
         <article className="glass card">
           <span className="muted">Refunds</span>
-          <strong>{transactionsAvailable ? money(summary.refundsMinor) : "Unavailable"}</strong>
+          <strong>{rollupsAvailable ? money(summary?.refundsMinor || 0) : "Unavailable"}</strong>
         </article>
         <article className="glass card">
           <span className="muted">Active capital</span>
-          <strong>{ordersAvailable ? money(summary.activeCapitalMinor) : "Unavailable"}</strong>
+          <strong>{rollupsAvailable ? money(summary?.activeCapitalMinor || 0) : "Unavailable"}</strong>
         </article>
         <article className="glass card">
           <span className="muted">Orders</span>
-          <strong>{ordersAvailable ? summary.orderCount.toLocaleString("en-NG") : "Unavailable"}</strong>
+          <strong>{rollupsAvailable ? summary?.orderCount.toLocaleString("en-NG") : "Unavailable"}</strong>
         </article>
         <article className="glass card">
           <span className="muted">Completed</span>
-          <strong>{ordersAvailable ? summary.completedOrders.toLocaleString("en-NG") : "Unavailable"}</strong>
+          <strong>{rollupsAvailable ? summary?.completedOrders.toLocaleString("en-NG") : "Unavailable"}</strong>
         </article>
       </div>
       <div className="form-grid" style={{ marginTop: 22 }}>
@@ -208,7 +241,7 @@ export default async function FinancePage({
         </section>
         <section className="glass card">
           <span className="eyebrow">Sales mix</span>
-          <h2>Top categories</h2>
+          <h2>Categories in recent matching orders</h2>
           {categories.length ? (
             categories.map(([category, item]) => (
               <div className="finance-category" key={category}>
@@ -239,8 +272,8 @@ export default async function FinancePage({
               <th>Status</th>
               <th>Quantity</th>
               <th>Customer charge</th>
-              <th>Capital cost</th>
-              <th>Recorded profit</th>
+              <th>Provider cost incurred</th>
+              <th>Quoted gross profit</th>
             </tr>
           </thead>
           <tbody>
@@ -258,7 +291,7 @@ export default async function FinancePage({
                   <td>{item.status.replaceAll("_", " ")}</td>
                   <td>{item.quantity.toLocaleString("en-NG")}</td>
                   <td>{money(item.customerPriceMinor)}</td>
-                  <td>{money(item.providerCostMinor)}</td>
+                  <td>{money(item.providerAccepted || Number.isInteger(item.providerOrderId) ? item.providerCostIncurredMinor ?? item.providerCostMinor : 0)}</td>
                   <td>{money(item.grossProfitMinor)}</td>
                 </tr>
               ))}

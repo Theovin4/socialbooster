@@ -67,6 +67,16 @@ export function recordNewCustomer(
     newCustomers: FieldValue.increment(1),
     updatedAt: FieldValue.serverTimestamp(),
   }, { merge: true });
+  transaction.set(snapshot.ref.firestore.collection("analyticsMonths").doc(todayKey.slice(0, 7)), {
+    monthKey: todayKey.slice(0, 7),
+    days: {
+      [todayKey]: {
+        newCustomers: FieldValue.increment(1),
+        updatedAt: FieldValue.serverTimestamp(),
+      },
+    },
+    updatedAt: FieldValue.serverTimestamp(),
+  }, { merge: true });
 }
 
 /** Records an order inside the same idempotent transaction that creates it. */
@@ -112,6 +122,11 @@ export async function reconcileOperationalTotals() {
     writer.set(db.collection("analyticsDaily").doc(dateKey), {
       dateKey,
       newCustomers,
+      updatedAt: FieldValue.serverTimestamp(),
+    }, { merge: true });
+    writer.set(db.collection("analyticsMonths").doc(dateKey.slice(0, 7)), {
+      monthKey: dateKey.slice(0, 7),
+      days: { [dateKey]: { newCustomers, updatedAt: FieldValue.serverTimestamp() } },
       updatedAt: FieldValue.serverTimestamp(),
     }, { merge: true });
   }

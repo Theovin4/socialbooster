@@ -8,6 +8,8 @@ import { postWallet } from "@/lib/firebase/wallet";
 import { requireAdmin } from "@/lib/firebase/session";
 import { getProvider } from "@/lib/providers";
 import { remainingRefundAmount } from "@/lib/order-refund-policy";
+import { recordFinanceOrderStatus } from "@/lib/firebase/analytics-rollups";
+import { lagosDateKey } from "@/lib/firebase/stats";
 
 export async function refreshLiveOrders() {
   await requireAdmin();
@@ -28,7 +30,18 @@ export async function refundOrder(formData: FormData) {
   const alreadyRefunded = [automaticRefund, manualRefund].filter((item) => item.exists).reduce((sum, item) => sum + Math.max(0, Number(item.get("deltaMinor") || 0)), 0);
   const amount = remainingRefundAmount(charge, [alreadyRefunded]);
   if (amount > 0) await postWallet({ userId: String(order.get("userId")), type: "refund", deltaMinor: amount, currency: String(order.get("currency") || "NGN"), idempotencyKey: `admin-order-refund:${orderId}`, reference: orderId, reason: "Administrator approved remaining undelivered order refund", actorUid: admin.uid });
-  await ref.set({ status: "refunded", refundedAmountMinor: Math.min(charge, alreadyRefunded + amount), refundedAt: FieldValue.serverTimestamp(), refundedBy: admin.uid, refundSource: amount > 0 ? "administrator" : "existing_verified_refund", updatedAt: FieldValue.serverTimestamp() }, { merge: true });
+  const previous = String(order.get("status") || "pending");
+  const orderUpdate = { status: "refunded", refundedAmountMinor: Math.min(charge, alreadyRefunded + amount), refundedAt: FieldValue.serverTimestamp(), refundedBy: admin.uid, refundSource: amount > 0 ? "administrator" : "existing_verified_refund", updatedAt: FieldValue.serverTimestamp() };
+  if (previous === "refunded") await ref.set(orderUpdate, { merge: true });
+  else await recordFinanceOrderStatus({
+    orderId,
+    previous,
+    next: "refunded",
+    customerPriceMinor: charge,
+    providerCostIncurredMinor: Number.isInteger(order.get("providerOrderId")) ? Number(order.get("providerCostIncurredMinor") ?? order.get("providerCostMinor") ?? 0) : 0,
+    dateKey: String(order.get("financeDateKey") || lagosDateKey(order.get("createdAt")?.toDate?.() || new Date())),
+    orderUpdate,
+  });
   await db.collection("orderEvents").add({ orderId, userId: order.get("userId"), status: "refunded", createdAt: FieldValue.serverTimestamp(), actorUid: admin.uid });
   revalidatePath("/admin/provider");
   revalidatePath("/dashboard/orders");

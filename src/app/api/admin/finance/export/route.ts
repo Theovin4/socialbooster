@@ -1,6 +1,6 @@
 import ExcelJS from "exceljs";
 import { requireAdmin } from "@/lib/firebase/session";
-import { loadFinanceData } from "@/lib/finance-data";
+import { loadFinanceDashboardData, loadFinanceData } from "@/lib/finance-data";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -30,7 +30,17 @@ export async function GET(request: Request) {
     to: url.searchParams.get("to") || undefined,
     status: url.searchParams.get("status") || "all",
   };
-  const data = await loadFinanceData(filters, { limit: 1_000 });
+  const [data, dashboard] = await Promise.all([
+    loadFinanceData(filters, { limit: 1_000 }),
+    loadFinanceDashboardData(filters),
+  ]);
+  if (!dashboard.summary || !dashboard.health.available) {
+    return Response.json({ error: "Finance rollups require a controlled rebuild before an authoritative export can be generated." }, { status: 503 });
+  }
+  if (!data.availability.orders || !data.availability.transactions || data.walletLiabilityMinor === null) {
+    return Response.json({ error: `Finance export data is unavailable: ${data.availability.unavailable.join(", ")}` }, { status: 503 });
+  }
+  const totals = dashboard.summary;
   const workbook = new ExcelJS.Workbook();
   workbook.creator = "Social Booster";
   workbook.created = new Date();
@@ -55,9 +65,11 @@ export async function GET(request: Request) {
     { header: "Status", key: "status", width: 18 },
     { header: "Quantity", key: "quantity", width: 13 },
     { header: "Customer Charge (NGN)", key: "charge", width: 23 },
-    { header: "Capital Cost (NGN)", key: "cost", width: 21 },
-    { header: "Recorded Profit (NGN)", key: "profit", width: 23 },
-    { header: "Followpanel Order ID", key: "provider", width: 22 },
+    { header: "Customer Refund (NGN)", key: "refund", width: 23 },
+    { header: "Net Sales (NGN)", key: "netSales", width: 21 },
+    { header: "Provider Cost Incurred (NGN)", key: "cost", width: 29 },
+    { header: "Gross Profit (NGN)", key: "profit", width: 22 },
+    { header: "Provider Order ID", key: "provider", width: 22 },
   ];
   data.orders
     .sort(
@@ -71,15 +83,17 @@ export async function GET(request: Request) {
         status: item.status,
         quantity: item.quantity,
         charge: item.customerPriceMinor / 100,
-        cost: item.providerCostMinor / 100,
-        profit: item.grossProfitMinor / 100,
+        refund: (item.refundedAmountMinor || 0) / 100,
+        netSales: (item.customerPriceMinor - (item.refundedAmountMinor || 0)) / 100,
+        cost: (item.providerAccepted || Number.isInteger(item.providerOrderId) ? item.providerCostIncurredMinor ?? item.providerCostMinor : 0) / 100,
+        profit: (item.customerPriceMinor - (item.refundedAmountMinor || 0) - (item.providerAccepted || Number.isInteger(item.providerOrderId) ? item.providerCostIncurredMinor ?? item.providerCostMinor : 0)) / 100,
         provider: item.providerOrderId || null,
       }),
     );
   applyHeader(orders.getRow(1));
-  orders.autoFilter = { from: "A1", to: "I1" };
+  orders.autoFilter = { from: "A1", to: "K1" };
   orders.getColumn("date").numFmt = "yyyy-mm-dd hh:mm";
-  ["charge", "cost", "profit"].forEach((key) => {
+  ["charge", "refund", "netSales", "cost", "profit"].forEach((key) => {
     orders.getColumn(key).numFmt = naira;
   });
   transactions.columns = [
@@ -106,8 +120,6 @@ export async function GET(request: Request) {
   transactions.autoFilter = { from: "A1", to: "E1" };
   transactions.getColumn("date").numFmt = "yyyy-mm-dd hh:mm";
   transactions.getColumn("amount").numFmt = naira;
-  const orderEnd = Math.max(2, orders.rowCount),
-    transactionEnd = Math.max(2, transactions.rowCount);
   summary.mergeCells("A1:D2");
   summary.getCell("A1").value = "SOCIAL BOOSTER — FINANCE REPORT";
   summary.getCell("A1").style = {
@@ -121,34 +133,27 @@ export async function GET(request: Request) {
   summary.getCell("A5").value = "Generated";
   summary.getCell("B5").value = new Date();
   summary.getCell("B5").numFmt = "yyyy-mm-dd hh:mm";
+  summary.getCell("C4").value = "Order status";
+  summary.getCell("D4").value = filters.status.replaceAll("_", " ");
   summary.getCell("A6").value = "Data scope";
   summary.getCell("B6").value = data.truncated
-    ? `Latest ${data.limit.toLocaleString("en-NG")} records per dataset. Use a shorter period for complete totals.`
-    : "Complete for the selected period";
+    ? `Detail sheets are truncated at ${data.limit.toLocaleString("en-NG")} records per dataset. Summary totals remain authoritative and complete.`
+    : "Complete detail sheets and authoritative summary totals for the selected period";
+  if (filters.status !== "all") summary.getCell("B6").value = `${summary.getCell("B6").value}. Order summary metrics use the selected status; deposits, current liability and the Transactions detail sheet remain global for the date period.`;
   const metrics = [
-    [
-      "Customer deposits",
-      `SUMIF('Transactions'!$C$2:$C$${transactionEnd},"deposit",'Transactions'!$D$2:$D$${transactionEnd})`,
-    ],
-    ["Order value", `SUM('Orders'!$F$2:$F$${orderEnd})`],
-    [
-      "Customer refunds",
-      `SUMIF('Transactions'!$C$2:$C$${transactionEnd},"refund",'Transactions'!$D$2:$D$${transactionEnd})`,
-    ],
-    ["Net sales", "B9-B10"],
-    [
-      "Capital deployed",
-      `SUMIF('Orders'!$I$2:$I$${orderEnd},">0",'Orders'!$G$2:$G$${orderEnd})`,
-    ],
-    ["Gross profit", "B11-B12"],
-    ["Gross margin", "IFERROR(B13/B11,0)"],
-    ["Wallet liability", String(data.walletLiabilityMinor / 100)],
+    ["Verified customer deposits", totals.depositsMinor / 100],
+    ["Order value", totals.orderValueMinor / 100],
+    ["Customer refunds", totals.refundsMinor / 100],
+    ["Net sales", totals.netSalesMinor / 100],
+    ["Capital deployed", totals.capitalDeployedMinor / 100],
+    ["Gross profit", totals.grossProfitMinor / 100],
+    ["Gross margin", totals.grossMarginBps === null ? "N/A" : totals.grossMarginBps / 10_000],
+    ["Current NGN wallet liability", totals.walletLiabilityMinor / 100],
   ];
-  metrics.forEach(([label, formula], index) => {
+  metrics.forEach(([label, value], index) => {
     const row = 8 + index;
     summary.getCell(`A${row}`).value = label;
-    summary.getCell(`B${row}`).value =
-      index === 7 ? Number(formula) : { formula };
+    summary.getCell(`B${row}`).value = value;
     summary.getCell(`A${row}`).font = { bold: true };
     summary.getCell(`B${row}`).numFmt = index === 6 ? "0.0%" : naira;
   });
@@ -168,7 +173,7 @@ export async function GET(request: Request) {
   applyHeader(definitions.getRow(1));
   [
     [
-      "Customer deposits",
+      "Verified customer deposits",
       "Verified money funded into customer wallets; this is cash inflow, not revenue.",
     ],
     [
@@ -181,14 +186,14 @@ export async function GET(request: Request) {
     ],
     [
       "Capital deployed",
-      "Recorded Followpanel cost of orders that received a Followpanel order ID.",
+      "Provider cost incurred only for orders accepted upstream and assigned a provider order ID.",
     ],
     [
       "Gross profit",
       "Net sales less capital deployed; excludes taxes, payment fees and operating expenses not stored in the application.",
     ],
     [
-      "Wallet liability",
+      "Current NGN wallet liability",
       "Current unused NGN customer wallet balances, regardless of the selected date filter.",
     ],
   ].forEach(([metric, definition]) =>

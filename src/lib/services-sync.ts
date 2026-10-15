@@ -5,7 +5,7 @@ import { adminDb } from "./firebase/admin";
 import { configuredUsdToNgnRateMicros, convertMinor } from "./currency";
 import { DEFAULT_GROSS_MARGIN_BPS, decimalToMinor, grossMarginBps, markupBps, sellingPriceForGrossMarginMinor } from "./money";
 import { providerDefinitions, providerServiceDocumentId, type ProviderDefinition, type ProviderKey } from "./providers";
-import { evaluateServiceQuality } from "./service-quality";
+import { choosePreferredDuplicateServices, evaluateServiceQuality, sanitizePublicCatalogCandidate } from "./service-quality";
 import { publicServiceId } from "./service-public-id";
 import { PUBLIC_CATALOG_SNAPSHOT_CHUNK_SIZE, readPublicCatalogSnapshot, writePublicCatalogSnapshot, type PublicCatalogSnapshotItem } from "./public-catalog-snapshot";
 
@@ -266,5 +266,20 @@ export async function synchronizeAllProviderServices() {
   const failures = settled.flatMap((item, index) => item.status === "rejected" ? [{ provider: providers[index].key, error: item.reason instanceof Error ? item.reason.message : String(item.reason) }] : []);
   failures.forEach((failure) => console.error("[services:sync] provider failed", failure));
   if (!results.length) throw new Error("Every configured provider failed to synchronize");
+  const snapshots = await Promise.all(providers.map((provider) => readPublicCatalogSnapshot(provider.key)));
+  const activePublicServices = choosePreferredDuplicateServices(
+    snapshots
+      .flatMap((snapshot) => snapshot?.items || [])
+      .map(sanitizePublicCatalogCandidate)
+      .filter((item): item is PublicCatalogSnapshotItem => item !== null && item.active !== false),
+  );
+  await adminDb().collection("publicCatalogStats").doc("current").set({
+    publicEligibleCount: activePublicServices.length,
+    providerCount: providers.length,
+    successfulProviders: results.length,
+    snapshotHashes: Object.fromEntries(providers.map((provider, index) => [provider.key, snapshots[index]?.hash || null])),
+    qualityState: "EXACT_CACHED",
+    updatedAt: FieldValue.serverTimestamp(),
+  }, { merge: true });
   return { providerCount: providers.length, successfulProviders: results.length, failedProviders: failures.length, serviceCount: results.reduce((sum, item) => sum + item.serviceCount, 0), changedCount: results.reduce((sum, item) => sum + item.changedCount, 0), repricedCount: results.reduce((sum, item) => sum + item.repricedCount, 0), providers: results, failures };
 }

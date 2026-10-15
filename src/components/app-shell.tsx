@@ -30,6 +30,7 @@ const adminLinks = [
   { label: "Support", href: "/admin/support", icon: Headphones },
   { label: "Live orders", href: "/admin/provider", icon: Activity },
   { label: "Cost report", href: "/admin/operations", icon: Gauge },
+  { label: "Data quality", href: "/admin/data-quality", icon: ClipboardList },
   { label: "Search health", href: "/admin/seo", icon: SearchCheck },
   { label: "Email marketing", href: "/admin/email-marketing", icon: Mail },
 ];

@@ -3,33 +3,38 @@ import { requireAdmin } from "@/lib/firebase/session";
 import { adminAuth, adminDb } from "@/lib/firebase/admin";
 import { formatMoney } from "@/lib/money";
 import { decideCryptoDeposit } from "./actions";
-import { expireAwaitingCryptoDeposits } from "@/lib/payments/crypto-reconcile";
 import { Toast } from "@/components/toast";
+import { metricRegistry } from "@/lib/analytics-quality";
 
 export const dynamic = "force-dynamic";
 
 export default async function CryptoAdminPage({ searchParams }: { searchParams: Promise<{ notice?: string }> }) {
   await requireAdmin();
-  await expireAwaitingCryptoDeposits();
   const { notice } = await searchParams;
-  const snapshot = await adminDb().collection("cryptoDeposits").orderBy("createdAt", "desc").limit(100).get();
+  const deposits = adminDb().collection("cryptoDeposits");
+  const [snapshot, awaitingCount, verifiedCount, approvedCount] = await Promise.all([
+    deposits.orderBy("createdAt", "desc").limit(25).get(),
+    deposits.where("status", "not-in", ["approved", "rejected", "cancelled"]).count().get(),
+    deposits.where("status", "==", "verified_pending_approval").count().get(),
+    deposits.where("status", "==", "approved").count().get(),
+  ]);
   const userIds = [...new Set(snapshot.docs.map((doc) => String(doc.get("userId"))))];
   const users = new Map<string, { email?: string; name?: string }>();
   await Promise.all(userIds.map(async (uid) => {
     try { const user = await adminAuth().getUser(uid); users.set(uid, { email: user.email, name: user.displayName }); }
     catch { users.set(uid, {}); }
   }));
-  const pending = snapshot.docs.filter((doc) => !["approved", "rejected", "cancelled"].includes(String(doc.get("status"))));
   return <AppShell admin>
     {notice === "error" ? <Toast type="error" title="Action not completed" message="The payment record was not changed. Refresh and try again, or review the transaction evidence." /> : notice ? <Toast type="success" title="Crypto payment updated" message={notice === "approved" ? "The confirmed payment was verified and the equivalent wallet amount was credited." : notice === "cancelled" ? "The unpaid payment request was cancelled." : notice === "rejected" ? "The payment was rejected without wallet credit." : "The latest blockchain status has been saved."} /> : null}
     <span className="eyebrow">Controlled settlement</span>
     <h1 className="page-heading">Crypto payments</h1>
     <p className="muted page-lead">Review automatic blockchain evidence before approving wallet credit. Approval rechecks the transaction and cannot credit the same hash twice.</p>
     <div className="grid3">
-      <article className="glass card stat-card"><span className="muted">Awaiting decision</span><strong className="stat-value">{pending.length}</strong></article>
-      <article className="glass card stat-card"><span className="muted">Verified, awaiting approval</span><strong className="stat-value">{snapshot.docs.filter((doc) => doc.get("status") === "verified_pending_approval").length}</strong></article>
-      <article className="glass card stat-card"><span className="muted">Verified and credited</span><strong className="stat-value">{snapshot.docs.filter((doc) => doc.get("status") === "approved").length}</strong></article>
+      <article className="glass card stat-card" title={metricRegistry.cryptoTotals.definition}><span className="muted">Awaiting decision</span><strong className="stat-value">{Number(awaitingCount.data().count).toLocaleString("en-NG")}</strong></article>
+      <article className="glass card stat-card" title={metricRegistry.cryptoTotals.definition}><span className="muted">Verified, awaiting approval</span><strong className="stat-value">{Number(verifiedCount.data().count).toLocaleString("en-NG")}</strong></article>
+      <article className="glass card stat-card" title={metricRegistry.cryptoTotals.definition}><span className="muted">Verified and credited</span><strong className="stat-value">{Number(approvedCount.data().count).toLocaleString("en-NG")}</strong></article>
     </div>
+    <p className="muted" style={{ marginTop: 10 }}>Cards are exact across all crypto payment records. The review list is bounded to the latest 25.</p>
     <div style={{ display: "grid", gap: 16, marginTop: 22 }}>
       {snapshot.empty ? <div className="glass card"><h2>No crypto payments yet</h2><p className="muted">Customer crypto submissions will appear here.</p></div> : snapshot.docs.map((doc) => {
         const item = doc.data(), status = String(item.status || "pending"), terminal = ["approved", "rejected", "cancelled"].includes(status), user = users.get(String(item.userId)), statusLabel = status === "approved" ? "verified and credited" : status.replaceAll("_", " ");

@@ -9,6 +9,7 @@ import { orderStatusEmailCopy, shouldSendOrderStatusEmail } from "./order-email-
 import { terminalRefundDecision } from "./order-refund-policy";
 import { recordCompletedOrderMarketing } from "./marketing-profile";
 import { recordFinanceOrderStatus } from "./firebase/analytics-rollups";
+import { lagosDateKey } from "./firebase/stats";
 import { createCustomerNotification } from "./customer-notifications";
 
 const STALE_AFTER_MS = 60_000;
@@ -63,10 +64,17 @@ export async function synchronizeOrderDocuments(documents: DocumentSnapshot[], f
     if (refundDecision === "none") Object.assign(update, { refundReviewStatus: FieldValue.delete(), refundReviewFirstSeenAt: FieldValue.delete(), refundReviewConfirmations: FieldValue.delete(), refundReviewReason: FieldValue.delete() });
     if (startCount !== null) update.startCount = startCount;
     if (remains !== null) update.remains = remains;
-    await doc.ref.set(update, { merge: true });
     if (status !== previous) {
       updated += 1;
-      await recordFinanceOrderStatus(doc.id, String(previous || "pending"), String(status), Number(doc.get("providerCostMinor") || 0));
+      await recordFinanceOrderStatus({
+        orderId: doc.id,
+        previous: String(previous || "pending"),
+        next: String(status),
+        customerPriceMinor: Number(doc.get("customerPriceMinor") || 0),
+        providerCostIncurredMinor: Number(doc.get("providerCostIncurredMinor") ?? doc.get("providerCostMinor") ?? 0),
+        dateKey: String(doc.get("financeDateKey") || lagosDateKey(doc.get("createdAt")?.toDate?.() || new Date())),
+        orderUpdate: update,
+      });
       await db.collection("orderEvents").add({ orderId: doc.id, userId: doc.get("userId"), status, previousStatus: previous, createdAt: FieldValue.serverTimestamp() });
       await createCustomerNotification({ userId: doc.get("userId"), type: "order_status", title: `Order ${status.replaceAll("_", " ")}`, orderId: doc.id });
       const routineEmailCount = Number(doc.get("customerRoutineEmailCount") || 0);
@@ -75,7 +83,7 @@ export async function synchronizeOrderDocuments(documents: DocumentSnapshot[], f
         await sendUserEmail(String(doc.get("userId")), { ...copy, buttonLabel: "View order", buttonUrl: `${process.env.NEXT_PUBLIC_APP_URL || "https://www.socialbooster.net.ng"}/dashboard/orders/${doc.id}` }).then(() => doc.ref.set({ ...(status === "completed" ? { customerRoutineEmailCount: FieldValue.increment(1) } : {}), lastCustomerEmailStatus: status, lastCustomerEmailAt: FieldValue.serverTimestamp() }, { merge: true })).catch((error) => console.warn("[order-email] delivery failed", { orderId: doc.id, error: error instanceof Error ? error.message : "Unknown error" }));
       }
       if (status === "completed") await recordCompletedOrderMarketing(doc.id).catch((error) => console.warn("[order-marketing-profile] completion update failed", { orderId: doc.id, error: error instanceof Error ? error.message : "Unknown error" }));
-    }
+    } else await doc.ref.set(update, { merge: true });
     if (["stage", "reject"].includes(refundDecision)) await db.collection("auditLogs").add({ action: refundDecision === "stage" ? "order_refund_staged" : "order_refund_evidence_rejected", targetType: "order", targetId: doc.id, providerKey, providerOrderId: doc.get("providerOrderId"), candidateStatus, startCount, remains, quantity, createdAt: FieldValue.serverTimestamp() });
     if (refundDecision === "confirm") {
       const sellingRateMinor = integer(String(doc.get("sellingRateMinor") ?? "")) || 0;

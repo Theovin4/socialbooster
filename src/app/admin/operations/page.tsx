@@ -11,14 +11,17 @@ const workflows = [
   ["Service detail", "0 direct", "Resolved from the same cached public snapshot."],
   ["Customer dashboard", "Up to 8", "One wallet document, five recent orders and two aggregation queries."],
   ["Customer order history", "Up to 20", "Cursor pagination; no second query after refresh."],
-  ["Admin overview", "Bounded", "Compact totals, daily rollups and three provider state documents."],
-  ["Finance dashboard", "26 default / up to 126", "One global rollup, bounded daily rollups and no more than 25 recent matching orders."],
+  ["Admin overview", "About 7 default; < 30", "Compact totals, monthly growth buckets and one actionable-order aggregate."],
+  ["Finance dashboard", "About 27 default; < 50", "One global rollup, compact monthly buckets and no more than 25 recent matching orders."],
+  ["Support inbox", "Up to 28", "Latest 25 conversations plus three exact aggregate counts."],
+  ["Crypto administration", "Up to 28", "Latest 25 records plus three exact aggregate counts; expiry is handled by cron."],
+  ["Email marketing", "Up to 27 per cache refresh", "Twelve exact aggregates plus the latest 15 campaigns; cached for five minutes."],
   ["Unchanged provider sync", "About 2 reads / 4 writes", "Catalogue hash short-circuits before inventory reads."],
 ] as const;
 
 function number(value: unknown) {
-  const parsed = Number(value || 0);
-  return Number.isFinite(parsed) ? parsed : 0;
+  const parsed = Number(value);
+  return value !== undefined && value !== null && Number.isFinite(parsed) ? parsed : null;
 }
 
 export default async function OperationsPage() {
@@ -52,8 +55,8 @@ export default async function OperationsPage() {
     <h1 className="page-heading">Operational read report</h1>
     <p className="muted page-lead">Bounded database work and the most recent catalogue synchronization measurements.</p>
     <div className="notice"><strong>{activeAlerts ? `${activeAlerts} operational alert${activeAlerts === 1 ? "" : "s"} require review` : "All Firebase guardrails are healthy"}</strong><p className="muted" style={{ marginBottom: 0 }}>The public catalogue never falls back to an unbounded collection scan. Customer lists, orders and finance reporting use bounded queries or rollups.</p></div>
-    <div className="grid3" style={{ marginTop: 22 }}>{states.map((item) => <article className="glass card stat-card" key={item.provider.key}><span className="eyebrow">{item.provider.label}</span><strong className="stat-value" style={{ fontSize: 26 }}>{item.status.replaceAll("_", " ")}</strong><span className="muted">{item.serviceCount.toLocaleString("en-NG")} services · last sync {item.reads.toLocaleString("en-NG")} reads / {item.writes.toLocaleString("en-NG")} writes{item.shortCircuited ? " · unchanged shortcut" : ""}</span>{item.alert || item.fallback ? <span style={{ color: "#fbbf24" }}>Review required</span> : null}</article>)}</div>
-    <section className="glass data-table-wrap" style={{ marginTop: 22 }}><table className="data-table"><thead><tr><th>Workflow</th><th>Approximate reads</th><th>Protection</th></tr></thead><tbody>{workflows.map(([workflow, reads, protection]) => <tr key={workflow}><td><strong>{workflow}</strong></td><td>{reads}</td><td>{protection}</td></tr>)}</tbody></table></section>
+    <div className="grid3" style={{ marginTop: 22 }}>{states.map((item) => <article className="glass card stat-card" key={item.provider.key}><span className="eyebrow">{item.provider.label}</span><strong className="stat-value" style={{ fontSize: 26 }}>{item.status.replaceAll("_", " ")}</strong><span className="muted">{item.serviceCount === null ? "Service count unavailable" : `${item.serviceCount.toLocaleString("en-NG")} services`} · last measured sync {item.reads === null ? "reads unavailable" : `${item.reads.toLocaleString("en-NG")} reads`} / {item.writes === null ? "writes unavailable" : `${item.writes.toLocaleString("en-NG")} writes`}{item.shortCircuited ? " · unchanged shortcut" : ""}</span>{item.alert || item.fallback ? <span style={{ color: "#fbbf24" }}>Review required</span> : null}</article>)}</div>
+    <section className="glass data-table-wrap" style={{ marginTop: 22 }}><table className="data-table"><thead><tr><th>Workflow</th><th>Expected read budget</th><th>Protection</th></tr></thead><tbody>{workflows.map(([workflow, reads, protection]) => <tr key={workflow}><td><strong>{workflow}</strong></td><td>{reads}</td><td>{protection}</td></tr>)}</tbody></table><p className="muted" style={{ padding: "0 18px 18px" }}>Expected budgets are architecture estimates, not live Firebase billing measurements. Provider cards above show measured values from the latest recorded synchronization when available.</p></section>
     <section className="glass card" style={{ marginTop: 22 }}><h2>Automatic thresholds</h2><ul className="muted" style={{ lineHeight: 1.9 }}><li>Provider syncs create a fixed-key warning at 10,000 reads or writes and a critical alert at 20,000.</li><li>Manual synchronization has a five-minute cooldown and a ten-minute distributed lock.</li><li>Customer-facing list queries return 50 or fewer records; order and notification pages return 20.</li><li>No pageview is written to Firestore.</li></ul></section>
   </AppShell>;
 }

@@ -53,17 +53,21 @@ export default async function ProviderHealthPage({ searchParams }: { searchParam
   const total = countSnapshot.data().count;
   const providers = providerDefinitions();
   const health = await Promise.all(providers.map(async (provider) => {
-    if (!provider.configured) return { ...provider, connected: false as const, balance: null, serviceCount: 0 };
-    const catalogueQuery = provider.key === "followspanel"
-      ? db.collection("providerServices").where(FieldPath.documentId(), ">=", "0").where(FieldPath.documentId(), "<=", `9\uf8ff`)
-      : db.collection("providerServices").where("providerKey", "==", provider.key);
-    const [balance, catalogueCount, syncState] = await Promise.all([
+    if (!provider.configured) return { ...provider, connectedNow: false as const, balance: null, serviceCount: null, publicServiceCount: null, lastSuccessfulSync: null };
+    const [balance, syncState] = await Promise.all([
       provider.client.balance().catch(() => null),
-      catalogueQuery.count().get().catch(() => null),
       db.collection("providerSyncState").doc(provider.key).get().catch(() => null),
     ]);
-    const storedCount = Number(catalogueCount?.data().count || 0);
-    return { ...provider, connected: Boolean(balance), balance, serviceCount: storedCount || Number(syncState?.get("serviceCount") || 0) };
+    const storedCount = Number(syncState?.get("serviceCount"));
+    const publicCount = Number(syncState?.get("publicServiceCount"));
+    return {
+      ...provider,
+      connectedNow: Boolean(balance),
+      balance,
+      serviceCount: Number.isSafeInteger(storedCount) && storedCount >= 0 ? storedCount : null,
+      publicServiceCount: Number.isSafeInteger(publicCount) && publicCount >= 0 ? publicCount : null,
+      lastSuccessfulSync: syncState?.get("completedAt")?.toDate?.() || null,
+    };
   }));
   const statusGroups = new Map<string, number[]>();
   for (const order of orders) {
@@ -80,7 +84,7 @@ export default async function ProviderHealthPage({ searchParams }: { searchParam
 
   return <AppShell admin>
     <div className="section-head"><div><span className="eyebrow">Order infrastructure</span><h1 className="page-heading">Providers and live orders</h1><p className="muted page-lead">Monitor connections and delivery status across every configured provider.</p></div><form action={refreshLiveOrders}><button className="btn primary">Refresh live data</button></form></div>
-    <div className="grid3">{health.map((provider) => <article className="glass card stat-card" key={provider.key}><span className="eyebrow">{provider.label}</span><strong className="stat-value" style={{ fontSize: 28 }}>{provider.connected ? "Connected" : provider.configured ? "Action required" : "Not configured"}</strong><span className="muted">{provider.balance ? `${provider.balance.currency} ${provider.balance.balance} · ` : ""}{provider.serviceCount ? `${provider.serviceCount.toLocaleString("en-NG")} synchronized services` : provider.connected ? "Connection verified" : "Connection unavailable"}</span></article>)}</div>
+    <div className="grid3">{health.map((provider) => <article className="glass card stat-card" key={provider.key}><span className="eyebrow">{provider.label}</span><strong className="stat-value" style={{ fontSize: 28 }}>{provider.connectedNow ? "Connected now" : provider.configured ? "Temporarily unreachable" : "Not configured"}</strong><span className="muted">Configuration: {provider.configured ? "configured" : "missing"}</span><span className="muted">{provider.balance ? `Live balance ${provider.balance.currency} ${provider.balance.balance}` : "Live balance unavailable"}</span><span className="muted">{provider.serviceCount === null ? "Synchronized service count unavailable" : `${provider.serviceCount.toLocaleString("en-NG")} synchronized`}{provider.publicServiceCount === null ? " · public eligible count unavailable" : ` · ${provider.publicServiceCount.toLocaleString("en-NG")} public eligible`}</span><span className="muted">Last successful sync: {provider.lastSuccessfulSync?.toLocaleString("en-NG", { timeZone: "Africa/Lagos" }) || "not recorded"}</span></article>)}</div>
     <section className="glass data-table-wrap" style={{ marginTop: 22 }}><table className="data-table"><thead><tr><th>Order</th><th>Date</th><th>Provider</th><th>External ID</th><th>Service</th><th>Qty</th><th>Charge</th><th>Local status</th><th>Live status</th><th>Start</th><th>Remaining</th><th>Cancellation</th><th>Last update</th><th></th></tr></thead><tbody>{orders.map((item) => {
       const providerKey = normalizeProviderKey(item.get("providerKey")), provider = providers.find((entry) => entry.key === providerKey)!, providerId = item.get("providerOrderId"), live = providerId ? liveByProvider.get(providerKey)?.[String(providerId)] : undefined, refunded = item.get("status") === "refunded", createdAt = item.get("createdAt")?.toDate?.(), lastUpdate = item.get("lastProviderUpdate")?.toDate?.();
       return <tr key={item.id}><td>#{item.id.slice(0, 8)}</td><td>{createdAt ? createdAt.toLocaleString("en-NG") : "—"}</td><td>{item.get("providerLabel") || provider.label}</td><td>{providerId || "Not submitted"}</td><td>{item.get("serviceName")}</td><td>{Number(item.get("quantity") || 0).toLocaleString("en-NG")}</td><td>{formatMoney(BigInt(item.get("customerPriceMinor") || 0), item.get("currency") || "NGN")}</td><td><span className="status-pill">{String(item.get("status") || "unknown").replaceAll("_", " ")}</span></td><td>{live?.status || item.get("providerStatus") || (providerId ? "Unavailable" : "—")}</td><td>{live?.start_count ?? item.get("startCount") ?? "—"}</td><td>{live?.remains ?? item.get("remains") ?? "—"}</td><td>{item.get("cancellationStatus") ? <><span className="status-pill">{String(item.get("cancellationStatus")).replaceAll("_", " ")}</span>{item.get("cancellationStatus") === "provider_confirmation_required" ? <form action={retryCancellation} style={{ marginTop: 8 }}><input type="hidden" name="orderId" value={item.id} /><button className="btn" type="submit">Retry</button></form> : null}</> : "—"}</td><td>{lastUpdate ? lastUpdate.toLocaleString("en-NG") : "—"}</td><td>{refunded ? <span className="status-pill">Refunded</span> : <form action={refundOrder}><input type="hidden" name="orderId" value={item.id} /><button className="btn" type="submit">Refund</button></form>}</td></tr>;

@@ -5,6 +5,7 @@ import {
 } from "firebase-admin/firestore";
 import { adminDb } from "./firebase/admin";
 import {
+  ACTIVE_FINANCE_ORDER_STATUSES,
   financePeriod,
   type FinanceOrder,
   type FinanceTransaction,
@@ -26,32 +27,73 @@ function boundedLimit(value?: number) {
 /** Quota-safe admin dashboard loader. It reads rollups plus at most 25 recent
  * orders; the larger loader below remains available only for explicit exports. */
 export async function loadFinanceDashboardData(filters: { range?: string; from?: string; to?: string; status?: string }) {
-  const db = adminDb(), period = financePeriod(filters), rollups = await loadFinanceRollups(period);
+  const db = adminDb(), period = financePeriod(filters), status = filters.status || "all";
   let query: Query = db.collection("orders");
   if (period.start) query = query.where("createdAt", ">=", Timestamp.fromDate(period.start));
   query = query.where("createdAt", "<=", Timestamp.fromDate(period.end));
-  if (filters.status && filters.status !== "all") query = query.where("status", "==", filters.status);
-  const snapshot = await query.orderBy("createdAt", "desc").limit(25).get();
-  const orders: FinanceOrder[] = snapshot.docs.map((doc) => ({
+  if (status !== "all") query = query.where("status", "==", status);
+  const orderedQuery = query.orderBy("createdAt", "desc").limit(25);
+  const [rollupResult, orderResult, statusAggregateResult] = await Promise.allSettled([
+    loadFinanceRollups({ ...period, status }),
+    orderedQuery.get(),
+    status === "all" ? Promise.resolve(null) : Promise.all([
+      query.count().get(),
+      query.aggregate({ total: AggregateField.sum("customerPriceMinor") }).get(),
+      query.aggregate({ total: AggregateField.sum("providerCostIncurredMinor") }).get(),
+      query.aggregate({ total: AggregateField.sum("refundedAmountMinor") }).get(),
+    ]),
+  ]);
+  const rollups = rollupResult.status === "fulfilled" ? rollupResult.value : null;
+  const snapshot = orderResult.status === "fulfilled" ? orderResult.value : null;
+  const statusAggregates = statusAggregateResult.status === "fulfilled" ? statusAggregateResult.value : null;
+  const orders: FinanceOrder[] = (snapshot?.docs || []).map((doc) => ({
     id: doc.id, createdAt: date(doc.get("createdAt")), status: String(doc.get("status") || "unknown"),
     serviceName: String(doc.get("serviceName") || "Unknown service"),
     category: String(doc.get("categoryName") || doc.get("serviceName") || "Other").split(/[|\[]/)[0].trim(),
     quantity: Number(doc.get("quantity") || 0), customerPriceMinor: Number(doc.get("customerPriceMinor") || 0),
     providerCostMinor: Number(doc.get("providerCostMinor") || 0), grossProfitMinor: Number(doc.get("grossProfitMinor") || 0),
     providerOrderId: doc.get("providerOrderId"),
+    providerAccepted: doc.get("providerAccepted") === true,
+    providerCostIncurredMinor: Number(doc.get("providerCostIncurredMinor") || 0),
+    refundedAmountMinor: Number(doc.get("refundedAmountMinor") || 0),
   }));
-  const summaryRollup = rollups.summary as Record<string, unknown>;
-  const value = (key: string) => Number(summaryRollup[key] || 0);
-  const orderValueMinor = value("orderValueMinor"), refundsMinor = value("refundsMinor"), netSalesMinor = Math.max(0, orderValueMinor - refundsMinor);
-  const capitalDeployedMinor = value("capitalDeployedMinor"), grossProfitMinor = netSalesMinor - capitalDeployedMinor;
-  return {
-    orders, daily: rollups.daily, period,
-    summary: {
+  const summaryRollup = rollups?.summary as Record<string, unknown> | null;
+  let summary = null;
+  if (summaryRollup && (status === "all" || statusAggregates)) {
+    const value = (key: string) => Number(summaryRollup[key]);
+    let orderCount = value("orderCount"), orderValueMinor = value("orderValueMinor"), refundsMinor = value("refundsMinor"), capitalDeployedMinor = value("capitalDeployedMinor");
+    if (status !== "all" && statusAggregates) {
+      const [count, orderValue, capital, refunds] = statusAggregates;
+      orderCount = Number(count.data().count);
+      orderValueMinor = Number(orderValue.data().total || 0);
+      capitalDeployedMinor = Number(capital.data().total || 0);
+      refundsMinor = Number(refunds.data().total || 0);
+    }
+    const netSalesMinor = orderValueMinor - refundsMinor, grossProfitMinor = netSalesMinor - capitalDeployedMinor;
+    const activeCapitalMinor = status === "all"
+      ? value("activeCapitalMinor")
+      : ACTIVE_FINANCE_ORDER_STATUSES.includes(status as (typeof ACTIVE_FINANCE_ORDER_STATUSES)[number]) ? capitalDeployedMinor : 0;
+    summary = {
       depositsMinor: value("depositsMinor"), orderValueMinor, refundsMinor, netSalesMinor, capitalDeployedMinor,
-      activeCapitalMinor: value("activeCapitalMinor"), grossProfitMinor,
-      grossMarginBps: netSalesMinor > 0 ? Math.round(grossProfitMinor * 10_000 / netSalesMinor) : 0,
-      walletLiabilityMinor: value("walletLiabilityMinor"), orderCount: value("orderCount"), completedOrders: value("completedOrders"),
+      activeCapitalMinor, grossProfitMinor,
+      grossMarginBps: netSalesMinor > 0 ? Math.round(grossProfitMinor * 10_000 / netSalesMinor) : null,
+      walletLiabilityMinor: value("walletLiabilityMinor"), orderCount,
+      completedOrders: status === "completed" ? orderCount : status === "all" ? value("completedOrders") : 0,
+    };
+  }
+  if (rollupResult.status === "rejected") console.error("[finance-dashboard] rollup unavailable", { error: rollupResult.reason instanceof Error ? rollupResult.reason.message : "Unknown error" });
+  if (orderResult.status === "rejected") console.error("[finance-dashboard] recent orders unavailable", { error: orderResult.reason instanceof Error ? orderResult.reason.message : "Unknown error" });
+  if (statusAggregateResult.status === "rejected") console.error("[finance-dashboard] status aggregate unavailable", { error: statusAggregateResult.reason instanceof Error ? statusAggregateResult.reason.message : "Unknown error" });
+  return {
+    orders, daily: rollups?.daily || [], period, summary,
+    health: rollups?.health || {
+      available: false,
+      financeRollupVersion: null,
+      historicalBackfillComplete: false,
+      lastReconciliationStatus: null,
+      lastReconciledAt: null,
     },
+    availability: { rollups: Boolean(summary), recentOrders: Boolean(snapshot), statusAggregate: status === "all" || Boolean(statusAggregates) },
   };
 }
 
@@ -74,6 +116,10 @@ export async function loadFinanceData(
     const start = Timestamp.fromDate(period.start);
     ordersQuery = ordersQuery.where("createdAt", ">=", start);
     transactionsQuery = transactionsQuery.where("createdAt", ">=", start);
+  }
+
+  if (filters.status && filters.status !== "all") {
+    ordersQuery = ordersQuery.where("status", "==", filters.status);
   }
 
   const end = Timestamp.fromDate(period.end);
@@ -125,14 +171,11 @@ export async function loadFinanceData(
       customerPriceMinor: Number(doc.get("customerPriceMinor") || 0),
       providerCostMinor: Number(doc.get("providerCostMinor") || 0),
       grossProfitMinor: Number(doc.get("grossProfitMinor") || 0),
+      refundedAmountMinor: Number(doc.get("refundedAmountMinor") || 0),
       providerOrderId: doc.get("providerOrderId"),
+      providerAccepted: doc.get("providerAccepted") === true,
+      providerCostIncurredMinor: Number(doc.get("providerCostIncurredMinor") || 0),
     }))
-    .filter(
-      (item) =>
-        !filters.status ||
-        filters.status === "all" ||
-        item.status === filters.status,
-    );
   const transactions: FinanceTransaction[] = (transactionsSnapshot?.docs || [])
     .map((doc) => ({
       id: doc.id,
@@ -143,7 +186,7 @@ export async function loadFinanceData(
       reference: String(doc.get("reference") || ""),
     }))
     .filter((item) => item.currency === "NGN");
-  const walletLiabilityMinor = walletAggregate ? Number(walletAggregate.data().total || 0) : 0;
+  const walletLiabilityMinor = walletAggregate ? Number(walletAggregate.data().total || 0) : null;
 
   return {
     orders,

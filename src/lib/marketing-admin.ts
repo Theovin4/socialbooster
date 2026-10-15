@@ -34,13 +34,14 @@ async function loadMarketingOverview() {
     Promise.all(segments.map(async (segment) => [segment, await marketingSegmentCount(segment)] as const)),
     db.collection(MARKETING_PROFILE_COLLECTION).where("marketingStatus", "==", "unsubscribed").count().get(),
     db.collection(MARKETING_PROFILE_COLLECTION).where("marketingStatus", "==", "suppressed").count().get(),
-    db.collection(MARKETING_CAMPAIGN_COLLECTION).orderBy("createdAt", "desc").limit(20).get(),
+    db.collection(MARKETING_CAMPAIGN_COLLECTION).orderBy("createdAt", "desc").limit(15).get(),
   ]);
   return {
     counts: Object.fromEntries(counts) as Record<MarketingSegmentId, number>,
     unsubscribed: Number(unsubscribed.data().count || 0),
     suppressed: Number(suppressed.data().count || 0),
     campaigns: campaigns.docs.map((doc) => ({ id: doc.id, ...doc.data(), createdAt: doc.get("createdAt")?.toDate?.()?.toISOString() || null })),
+    asOf: new Date().toISOString(),
   };
 }
 

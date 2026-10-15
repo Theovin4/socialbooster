@@ -7,8 +7,8 @@ import { serviceSellingRateNgnMinor } from "./currency";
 import { ProviderError } from "./providers/followspanel";
 import { getProvider, normalizeProviderKey } from "./providers";
 import { sendAdminAlert, sendUserEmail } from "./email";
-import { recordNewOrder } from "./firebase/stats";
-import { recordFinanceOrderCreated, recordWalletRollup } from "./firebase/analytics-rollups";
+import { lagosDateKey, recordNewOrder } from "./firebase/stats";
+import { recordFinanceOrderCreated, recordFinanceOrderStatus, recordFinanceProviderAccepted, recordWalletRollup } from "./firebase/analytics-rollups";
 import { assertServiceOrderEligible, ServiceUnavailableError } from "./service-quality";
 
 export type NewOrder = { userId: string; serviceId: string; link: string; quantity: number; idempotencyKey: string };
@@ -16,7 +16,7 @@ export async function createAndSubmitOrder(input: NewOrder) {
   if (process.env.ORDER_SUBMISSION_ENABLED !== "true") throw new Error("Order submission is not enabled");
   if (!/^(?:\d+|followspanel_[A-Za-z0-9][A-Za-z0-9_-]{2,127}|(?:nitro|smmworld)_\d+)$/.test(input.serviceId) || !Number.isSafeInteger(input.quantity) || input.quantity <= 0) throw new Error("Invalid order");
   const url = new URL(input.link); if (!['http:', 'https:'].includes(url.protocol)) throw new Error("Invalid target URL");
-  const db = adminDb(), orderRef = db.collection("orders").doc(input.idempotencyKey), walletRef = db.collection("wallets").doc(input.userId), serviceRef = db.collection("services").doc(input.serviceId);
+  const db = adminDb(), orderRef = db.collection("orders").doc(input.idempotencyKey), walletRef = db.collection("wallets").doc(input.userId), serviceRef = db.collection("services").doc(input.serviceId), financeDateKey = lagosDateKey();
   const local = await db.runTransaction(async (transaction) => {
     const [existing, wallet, service] = await Promise.all([transaction.get(orderRef), transaction.get(walletRef), transaction.get(serviceRef)]);
     if (existing.exists) return existing.data()!;
@@ -37,10 +37,10 @@ export async function createAndSubmitOrder(input: NewOrder) {
     transaction.create(db.collection("walletLedger").doc(walletTransactionId), { walletUserId: input.userId, transactionId: walletTransactionId, type: "order_debit", deltaMinor: -customerPriceMinor, currency, balanceBeforeMinor: available, balanceAfterMinor: next, reference: orderRef.id, createdAt: FieldValue.serverTimestamp() });
     const grossProfitMinor = customerPriceMinor - convertedProviderCostMinor;
     const providerKey = normalizeProviderKey(data.providerKey);
-    const order = { userId: input.userId, serviceId: input.serviceId, serviceName: data.publicName || data.name, serviceCategory: data.categoryName || "Social media service", providerKey, providerLabel: data.providerLabel || getProvider(providerKey).label, providerServiceId: data.providerServiceId, link: input.link, quantity: input.quantity, currency, sellingRateMinor: Number(sellingRateMinor), providerCurrency: data.providerCurrency || "NGN", providerRateMinor: data.providerRateMinor, providerCostMinor, convertedProviderCostMinor, customerPriceMinor, grossProfitMinor, grossMarginTargetBps: Number(DEFAULT_GROSS_MARGIN_BPS), markupBps: Number(markupBps(BigInt(convertedProviderCostMinor), BigInt(customerPriceMinor))), grossMarginBps: Number(grossMarginBps(BigInt(convertedProviderCostMinor), BigInt(customerPriceMinor))), pricingModel: "ngn_gross_margin_v2", refillSupported: data.refillSupported, cancelSupported: data.cancelSupported, status: "submitting", idempotencyKey: input.idempotencyKey, createdAt: FieldValue.serverTimestamp(), updatedAt: FieldValue.serverTimestamp() };
+    const order = { userId: input.userId, serviceId: input.serviceId, serviceName: data.publicName || data.name, serviceCategory: data.categoryName || "Social media service", providerKey, providerLabel: data.providerLabel || getProvider(providerKey).label, providerServiceId: data.providerServiceId, link: input.link, quantity: input.quantity, currency, sellingRateMinor: Number(sellingRateMinor), providerCurrency: data.providerCurrency || "NGN", providerRateMinor: data.providerRateMinor, providerCostMinor, convertedProviderCostMinor, customerPriceMinor, grossProfitMinor, grossMarginTargetBps: Number(DEFAULT_GROSS_MARGIN_BPS), markupBps: Number(markupBps(BigInt(convertedProviderCostMinor), BigInt(customerPriceMinor))), grossMarginBps: Number(grossMarginBps(BigInt(convertedProviderCostMinor), BigInt(customerPriceMinor))), pricingModel: "ngn_gross_margin_v2", refillSupported: data.refillSupported, cancelSupported: data.cancelSupported, status: "submitting", financeDateKey, providerAccepted: false, providerCostIncurredMinor: 0, idempotencyKey: input.idempotencyKey, createdAt: FieldValue.serverTimestamp(), updatedAt: FieldValue.serverTimestamp() };
     transaction.create(orderRef, order); transaction.create(db.collection("orderEvents").doc(), { orderId: orderRef.id, userId: input.userId, status: "submitting", createdAt: FieldValue.serverTimestamp() });
     recordNewOrder(transaction);
-    recordFinanceOrderCreated(transaction, { customerPriceMinor, providerCostMinor, grossProfitMinor });
+    recordFinanceOrderCreated(transaction, { customerPriceMinor, dateKey: financeDateKey, status: "submitting" });
     recordWalletRollup(transaction, { type: "order_debit", deltaMinor: -customerPriceMinor, currency });
     return order;
   });
@@ -50,7 +50,7 @@ export async function createAndSubmitOrder(input: NewOrder) {
     if (!provider.configured) throw new ProviderError("Selected provider is not configured", "NOT_CONFIGURED");
     const result = await provider.client.add(local.providerServiceId, input.link, input.quantity);
     console.info("[order-submit] provider accepted", { orderId: orderRef.id, providerKey: provider.key, providerOrderId: result.order, providerServiceId: local.providerServiceId, quantity: input.quantity });
-    await orderRef.set({ providerOrderId: result.order, status: "pending", submittedAt: FieldValue.serverTimestamp(), updatedAt: FieldValue.serverTimestamp() }, { merge: true });
+    await recordFinanceProviderAccepted({ orderId: orderRef.id, providerOrderId: result.order });
     await db.collection("orderEvents").add({ orderId: orderRef.id, userId: input.userId, status: "pending", createdAt: FieldValue.serverTimestamp() });
     await sendAdminAlert({ subject: `New order #${orderRef.id.slice(0, 8)}`, title: "New customer order", message: `${String(local.serviceName)} · Quantity ${input.quantity.toLocaleString("en-NG")} · Charge NGN ${(Number(local.customerPriceMinor) / 100).toLocaleString("en-NG", { minimumFractionDigits: 2 })} · ${provider.label} order ${result.order}.`, buttonLabel: "Review live order", buttonUrl: `${process.env.NEXT_PUBLIC_APP_URL || "https://www.socialbooster.net.ng"}/admin/provider` }).catch((error) => console.warn("[admin-order-email] delivery failed", { orderId: orderRef.id, error: error instanceof Error ? error.message : "Unknown error" }));
     await sendUserEmail(input.userId, { subject: `Order #${orderRef.id.slice(0, 8)} confirmed`, title: "Order confirmed", message: `Your ${String(local.serviceName)} order for ${input.quantity.toLocaleString("en-NG")} has been accepted. You can view its verified status, start count and remaining quantity from your order dashboard.`, buttonLabel: "Track order", buttonUrl: `${process.env.NEXT_PUBLIC_APP_URL || "https://www.socialbooster.net.ng"}/dashboard/orders/${orderRef.id}` }).then(() => orderRef.set({ customerRoutineEmailCount: FieldValue.increment(1), confirmationEmailSentAt: FieldValue.serverTimestamp() }, { merge: true })).catch((error) => console.warn("[order-confirmation-email] delivery failed", { orderId: orderRef.id, error: error instanceof Error ? error.message : "Unknown error" }));
@@ -66,8 +66,19 @@ export async function createAndSubmitOrder(input: NewOrder) {
       code: error instanceof ProviderError ? error.code : "NETWORK",
       error: error instanceof Error ? error.message : "Unknown error",
     });
-    await orderRef.set({ status, providerErrorCode: error instanceof ProviderError ? error.code : "NETWORK", updatedAt: FieldValue.serverTimestamp() }, { merge: true });
-    if (definitelyRejected) await postWallet({ userId: input.userId, type: "refund", deltaMinor: local.customerPriceMinor, currency: local.currency, idempotencyKey: `refund:${orderRef.id}`, reference: orderRef.id, reason: "Provider rejected order submission" });
+    await recordFinanceOrderStatus({
+      orderId: orderRef.id,
+      previous: "submitting",
+      next: status,
+      customerPriceMinor: Number(local.customerPriceMinor),
+      providerCostIncurredMinor: 0,
+      dateKey: String(local.financeDateKey || financeDateKey),
+      orderUpdate: { status, providerErrorCode: error instanceof ProviderError ? error.code : "NETWORK", updatedAt: FieldValue.serverTimestamp() },
+    });
+    if (definitelyRejected) {
+      await postWallet({ userId: input.userId, type: "refund", deltaMinor: local.customerPriceMinor, currency: local.currency, idempotencyKey: `refund:${orderRef.id}`, reference: orderRef.id, reason: "Provider rejected order submission" });
+      await orderRef.set({ refundedAmountMinor: Number(local.customerPriceMinor), refundedAt: FieldValue.serverTimestamp(), refundSource: "provider_rejected_before_acceptance", updatedAt: FieldValue.serverTimestamp() }, { merge: true });
+    }
     const customerMessage = definitelyRejected
       ? `Order #${orderRef.id.slice(0, 8)} could not be accepted. The full charge has been returned to your wallet automatically.`
       : `Order #${orderRef.id.slice(0, 8)} is being checked before another submission attempt. No duplicate order will be created.`;
