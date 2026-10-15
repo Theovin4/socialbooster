@@ -14,9 +14,10 @@ The interrupted work was recovered from the existing checkout. Nothing was rebui
 | Recovered baseline | `7c4e63a400142e0f2b39743b6323cc96e1eaf778` — `Document catalogue safety release` |
 | Finance implementation commit | `b92b79d` — `Repair finance analytics and admin metrics` |
 | Released handoff commit | `984df3b782228d5662ef7c569381cdfd1b659359` — `Document finance repair release gates` |
+| Catalogue-cache completion commit | `73463b6591234ebb74808cec2d6bfedc9388737d` — `Initialize missing catalogue analytics cache` |
 | Firebase project | `socialbooster-cbcc6` |
 | Production site | `https://www.socialbooster.net.ng` |
-| Working tree | Production Finance was rebuilt and reconciled; a focused missing catalogue-count cache initializer is awaiting release and final verification |
+| Working tree | Implementation is released and production-verified; only this final handoff update follows the verified code commit |
 
 No real payment, order, refill, cancellation, provider submission, crypto approval, wallet mutation, customer-data mutation, or manual provider synchronization was used during this repair.
 
@@ -98,8 +99,8 @@ Provider cost is recorded only after a provider returns a valid order ID. Creati
 | Production dependency audit | Passed: 0 vulnerabilities |
 | Full dependency audit | 25 development-tool advisories (1 moderate, 22 high, 2 critical); some have no available fix and no automatic fix was applied |
 | Index deployment/readiness | Passed: deployed index configuration verified READY in `socialbooster-cbcc6` |
-| Vercel production deployment | Passed for exact commit `984df3b`: deployment `dpl_2BLjMrf8rDfoaZqk6MjvWRa5q87U` is READY and assigned to the production domains |
-| Production rebuild/reconciliation | Rollup version 2 and historical backfill completed. All Finance values and all available cross-page values match; the pre-existing active-service cache was unavailable and its safe initializer is pending release. |
+| Vercel production deployment | Passed for exact completion commit `73463b6`: deployment `dpl_DKPN1f1xuQCG5ifRSLkocUwmCs9h` is READY and assigned to `www.socialbooster.net.ng` and the other production aliases |
+| Production rebuild/reconciliation | Passed: rollup version 2, historical backfill complete, all 10 Finance comparisons and all 5 cross-page comparisons `MATCH` at 15 October 2026 21:36 Africa/Lagos; active services matched 2,310 to 2,310 |
 
 ## Workflow verification and safety limits
 
@@ -111,7 +112,7 @@ Provider cost is recorded only after a provider returns a valid order ID. Creati
 | Provider sync | Followspanel, Nitro and SMM World integrations remain in existing configuration. No live sync ran. |
 | Wallets / payments / refunds | Ledger remains authoritative and idempotent. No balance or payment changed. |
 | Refills / cancellations | Existing ownership/capability checks remain. No provider action was sent. |
-| Support / admin | Totals use exact aggregates and bounded lists. Admin claims remain mandatory. |
+| Support / admin | Totals use exact aggregates and bounded lists. Admin claims remain mandatory. The overview displays 2,310 active services from the exact cached snapshot count. |
 | Finance rebuild | Controlled, versioned, locked and additive; version 2 backfill completed and every Finance metric reconciled exactly. |
 
 ## Firestore read-budget assessment
@@ -127,52 +128,38 @@ These are architecture-based upper-bound estimates for a normal page load, not F
 | Email marketing overview | Up to 27 on a five-minute cache refresh; near zero database reads on a warm cache |
 | Manual reconciliation | Low hundreds at the current catalogue shape: compact totals plus provider snapshot chunks |
 
-The rebuild reads every authoritative order and wallet transaction once, performs one wallet aggregate, and writes canonical order fields plus affected daily/monthly/global rollups. Its exact cost must be recorded from the production result rather than estimated. Normal request paths remain comfortably below the requested 5,000-read safety target; sustained daily consumption still depends on real traffic and must be checked in Firebase billing/usage telemetry.
+The rebuild reads every authoritative order and wallet transaction once, performs one wallet aggregate, and writes canonical order fields plus affected daily/monthly/global rollups. The protected UI did not expose its per-operation counters, and the hosting plan's runtime-log retention had expired before those counters were retrieved, so exact rebuild I/O is unavailable in this handoff. Normal request paths remain comfortably below the requested 5,000-read safety target; sustained daily consumption still depends on real traffic and must be checked in Firebase billing/usage telemetry.
 
-## Known issues and release blockers
+**Firebase free-tier safety assessment: PASS for normal application routes**, based on bounded-query architecture and the estimates above; this is not a substitute for production billing telemetry.
 
-1. Deploy the focused missing-cache initializer and rerun reconciliation so the exact 2,310-service snapshot count becomes available to the Admin overview without a provider sync.
-2. No browser E2E suite exists. Live checks must remain read-only and avoid financial/provider submissions.
-3. README and old setup documents have historical drift and should be reconciled separately.
-4. Do not apply automatic major-version dependency fixes inside this focused Finance patch.
+## Known issues and follow-ups
+
+There is no remaining Finance release blocker.
+
+1. No browser E2E suite exists. Live checks must remain read-only and avoid financial/provider submissions.
+2. README and old setup documents have historical drift and should be reconciled separately.
+3. The full dependency audit still reports 25 development-tool advisories (1 moderate, 22 high, 2 critical), including packages without an automatic fix. Production dependencies report zero vulnerabilities.
+4. Exact one-time rebuild I/O counters were not recoverable after the short runtime-log retention window; use Firebase usage telemetry for billing evidence.
 
 ## Next steps in small phases
 
-### Phase 1 — Final local gate
+### Phase 1 — Routine monitoring
 
-- Re-run TypeScript, ESLint and all tests where child-process execution is available.
-- Run production/full dependency audits without automatic fixes.
-- Review the final diff for secrets, credentials and production data.
+- Check Finance health and the read-only data-quality page after material releases or incidents.
+- Use Firebase usage/billing telemetry to validate real traffic consumption against the architecture estimates.
+- Run manual reconciliation only when an administrator intentionally requests a fresh comparison.
 
-### Phase 2 — Index-first release
+### Phase 2 — Automated verification
 
-- Deploy only `firestore.indexes.json` to `socialbooster-cbcc6`.
-- Wait for every new index to report READY.
-- Do not run the Finance rebuild while indexes are building.
+- Add emulator-backed concurrent order-transition, refund and rollup tests.
+- Add authenticated browser E2E coverage using non-financial fixtures.
+- Add an alert for a stored `DRIFT DETECTED` result without automatically repairing operational data.
 
-### Phase 3 — Application release
+### Phase 3 — Maintenance
 
-- Commit and push the focused patch to `main`.
-- Require a successful Vercel build from that exact commit.
-- Confirm public routes and signed-out protection without form submissions.
-
-### Phase 4 — Controlled production reconciliation
-
-- Sign in with an authorized administrator account.
-- Run reconciliation first; if drift/version unavailable, run one controlled rebuild.
-- Confirm version 2, backfill complete and reconciliation MATCH.
-- Record reads, writes, dates, totals and timestamps. Never edit ledger/order totals manually.
-
-### Phase 5 — Read-only cross-page QA
-
-- Verify Finance ranges/status filters/export and all admin metric labels/freshness.
-- Inspect runtime logs for missing-index, permission, serialization or reconciliation errors.
-
-### Phase 6 — Separate follow-up
-
-- Add emulator-backed concurrent transition tests and authenticated browser E2E coverage.
 - Reconcile README/setup documentation.
-- Address development-tool advisories only in a dedicated upgrade task.
+- Address development-tool advisories in a dedicated upgrade task with full regression testing; do not use an automatic major-version fix on production.
+- Keep provider catalogue synchronization on its existing guarded schedule; require explicit authorization for any manual live sync.
 
 ## Safety rules for the next session
 
