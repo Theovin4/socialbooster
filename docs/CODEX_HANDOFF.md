@@ -1,237 +1,185 @@
 # Social Booster Codex handoff
 
-Snapshot date: 14 October 2026 (Africa/Lagos)
+Snapshot date: 15 October 2026 (Africa/Lagos)
 
-## Recovery summary
+## Recovery and repository state
 
-The previous Codex task ended during remote context compaction, but its work was not lost. The original checkout is intact, clean, pushed, and deployed.
+The interrupted work was recovered from the existing checkout. Nothing was rebuilt from scratch, reset, deleted, or overwritten.
 
-| Item | Recovered state |
+| Item | Current state |
 | --- | --- |
-| Repository | `C:\Users\USER\Documents\social booster` |
-| Branch | `main` |
-| Upstream | `origin/main` |
-| Git remote | `https://github.com/Theovin4/socialbooster.git` |
-| Current commit | `85fff98cefe4dfed2d150a697b732ced16dcf5e5` |
-| Commit title | `Complete final production quality pass` |
-| Working tree | Clean; no staged, unstaged, or untracked files before this handoff document |
-| Vercel project | `socialbooster` (`prj_5oXhNKTwO6E4Y8bSYtYK0v6OclEm`) |
-| Production deployment | `dpl_GCUBgnJPPDAzpRBiDjvFEvtsKwCB`, state `READY` |
-| Production aliases | `www.socialbooster.net.ng`, `socialbooster.net.ng`, and the connected Vercel aliases |
+| Working checkout | `C:\Users\USER\Documents\Codex\2026-10-13\act-as-a-senior-software-engineer\work\socialbooster` |
+| Repository | `https://github.com/Theovin4/socialbooster.git` |
+| Branch / upstream | `main` / `origin/main` |
+| Recovered baseline | `7c4e63a400142e0f2b39743b6323cc96e1eaf778` — `Document catalogue safety release` |
+| Finance implementation commit | `b92b79d` — `Repair finance analytics and admin metrics` |
+| Firebase project | `socialbooster-cbcc6` |
+| Production site | `https://www.socialbooster.net.ng` |
+| Working tree | Finance implementation and release handoff are committed locally; production release gates are recorded below |
 
-No deployment, provider synchronization, order, refill, wallet mutation, customer-data mutation, or financial transaction was triggered during recovery.
+No real payment, order, refill, cancellation, provider submission, crypto approval, wallet mutation, customer-data mutation, or manual provider synchronization was used during this repair.
 
-## Catalogue-safety continuation
-
-The recovered baseline commit is `85fff98cefe4dfed2d150a697b732ced16dcf5e5`. The verified catalogue-safety application release is commit `d4d96e4b67a462572e91be493b5c7a47272ae73f` (`Harden public catalogue eligibility`), pushed to `origin/main`. Vercel production deployment `dpl_3yjX85EJV2Mz5Dojhe8HZyMrm54k` reached `READY` and serves the canonical production aliases.
-
-The patch strengthens the existing shared service-quality engine rather than creating page-specific filters. It now returns an eligibility decision, stable reason codes, normalized public name/category, pricing status, and compliance status. The same engine is used during provider synchronization, as a zero-additional-read guard when cached public snapshot rows are loaded, and inside the authoritative order transaction before any wallet debit. Consequently, public catalogue/search/pricing/platform/API consumers share one filtered catalogue, while direct web, API, and mass-order IDs are independently revalidated at order time.
-
-Confirmed regression coverage includes:
-
-- `AUDIOMACK SERVICES` with quantity `1–1` is classified as `NON_SERVICE_RECORD`, `UNMAPPED_CATEGORY`, and `PRICE_ANOMALY`;
-- NGN 495,682,687,500, NGN 55,075,853,616.67, and contextual NGN 5,507,584,866.67 placeholder prices are rejected;
-- a meaningful high-priced service is not rejected merely for being expensive;
-- Apple Music and Audiomack categories are canonicalized, duplicated countries/worldwide labels are removed, unsupported provider claims are not promoted, and the confirmed malformed names receive clean public labels;
-- stale bad rows are removed from the next immutable public snapshot and are also filtered at read time without scanning the `services` collection;
-- stored service cost, selling price, limits, activity, eligibility, and compliance are rechecked before transactional wallet writes;
-- the required selling-price formula remains `provider cost / 0.60`, using integer minor units and upward rounding.
-
-Catalogue quality ruleset version `3` deliberately forces one bounded snapshot rebuild even when provider catalogue hashes are otherwise unchanged. The migration reuses provider results plus compact fingerprint/snapshot state; it does not read or rewrite all service documents. Raw provider names/categories remain internal for diagnosis, and admin catalogue health displays normalized output, provider cost, selling price, public ID, and reason codes. Existing governance changes remain explicit and audit logged.
-
-### Verification for this candidate
-
-| Gate | Result |
-| --- | --- |
-| Unit/integration tests | 25 files passed; 120 tests passed (baseline was 109) |
-| Firebase Rules tests | 2 passed within the full suite |
-| TypeScript | Passed (`tsc --noEmit`) |
-| ESLint | Passed |
-| Production build | Passed; 88 routes generated |
-| Production dependency audit | Passed; 0 vulnerabilities with `npm audit --omit=dev` |
-| Full dependency audit | 10 development-tool advisories (1 moderate, 7 high, 2 critical); automated remedies require major/incompatible Vitest or ESLint changes and were not folded into this small patch |
-| Secret scan | No private-key or common live-token patterns found in tracked files |
-| Diff check | Passed; no whitespace errors |
-
-No real payment, wallet mutation, order, refill, cancellation, provider submission, or customer-data write was used for verification. Cache-busted production checks returned HTTP 200 for `/services`, `/instagram`, `/tiktok`, `/facebook`, `/youtube`, `/telegram`, and `/pricing`. The public catalogue exposes 2,306 sanitized services, contains no confirmed bad IDs or `AUDIOMACK SERVICES` header, uses canonical Apple Music/Audiomack labels, and returns HTTP 404 for `SB-C7D93610323AB12F`, `SB-E81A8E853537640E`, and `SB-9019C6D80C351B5D`.
-
-The ruleset-3 snapshot republish was not manually triggered. The protected production credential is stored as a Vercel Secret and is intentionally not retrievable through the scoped CLI/API paths available to this session; the rejected attempts returned `401` and performed no sync. Pulling the entire production environment was blocked because it would unnecessarily expose unrelated payment, Firebase, email, and provider secrets. The deployed zero-read snapshot guard provides immediate public/order safety, and the existing Vercel cron will run `/api/cron/services` at `23:00 UTC`; its provider inventory and per-reason quality counts remain the next observation task.
-
-## Current architecture
+## Architecture
 
 ### Application and hosting
 
-- Next.js 16 App Router, React 19, TypeScript, Node.js 24.
-- Vercel hosts the application and runs three authenticated cron routes:
-  - daily service/provider synchronization;
-  - bounded order, refill, and crypto-verification synchronization;
-  - bounded account-activation recovery email processing.
-- Security headers, HSTS, CSP, clickjacking protection, content-type protection, referrer policy, and permissions policy are emitted in production.
+- Next.js 16 App Router, React 19, TypeScript and Node.js.
+- Vercel hosts the application and runs authenticated cron routes for provider catalogue synchronization, bounded order/refill/crypto synchronization, and activation recovery.
+- Firebase Authentication supplies customer identity and administrator custom claims.
+- Firestore is the authoritative operational database. Firebase Admin performs server-side reads and mutations; browser access is constrained by Firestore rules.
+- The repository contains no active Supabase client, environment configuration, migration, or runtime query. Supabase is not part of the production architecture.
 
-### Identity and data
+### Providers and catalogue
 
-- Firebase Authentication handles email/password and Google sign-in.
-- The server exchanges a recent Firebase ID token for the HTTP-only `sb_session` cookie and checks revocation on protected operations.
-- Firestore is the active production database. Firebase Admin performs authoritative mutations; browser clients are restricted by `firestore.rules`.
-- Wallets, payment intents/events, orders/events, refills, support tickets/messages, provider services, audit logs, notifications, and analytics rollups are stored in Firestore.
-- Admin access requires a verified Firebase custom claim (`admin: true`).
-- The `supabase/migrations` directory is empty. There is no Supabase dependency, environment variable, client, query, migration, or runtime reference. Supabase is not part of the active architecture and should not be introduced during recovery without an explicit migration project.
-
-### Provider integrations
-
-- Followspanel uses the dedicated `FollowsPanelClient` and defaults to `https://followspanel.com/api/v2`.
-- Nitro uses the standard panel client with form-encoded requests and defaults to `https://nitro.ng/api/v2`.
-- SMM World uses the standard panel client with JSON requests and defaults to `https://my.smmworld.org/api/v2`.
-- Provider reads may retry with backoff; order/refill/cancel submissions deliberately do not retry automatically.
-- Provider service identifiers are namespaced where needed, provider identities are hidden behind public `SB-*` identifiers, and the public catalogue is read from versioned Firestore snapshot chunks with a previous-good fallback.
-- Synchronization is bounded, locked, fingerprinted, and short-circuits unchanged catalogues. The prior completed production pass reported all three providers successful. Recovery did not rerun synchronization because it would mutate production state and contact live providers.
+- Followspanel uses its dedicated API client.
+- Nitro and SMM World use the standard panel client with their required request encodings.
+- Public services are produced from versioned, compact provider snapshots and mapped to provider-neutral public IDs.
+- Catalogue quality rules sanitize names, reject non-service/placeholder rows, deduplicate public entries and enforce order eligibility again inside the order transaction.
+- Provider submissions are not automatically retried when the outcome is uncertain. Such orders enter `provider_confirmation_required` to prevent accidental duplicate upstream orders.
 
 ### Pricing and money
 
-- The mandatory target is a 40% gross margin (`4,000` basis points).
-- The authoritative formula is `selling price = provider cost / (1 - 0.40)`, rounded up to the nearest minor unit.
-- Example: a provider cost of NGN 1,000 produces a selling price of approximately NGN 1,666.67.
-- The rule is centralized in `src/lib/money.ts` and reused by provider synchronization, order creation, and admin price-reset paths.
-- Orders persist provider cost, customer price, gross profit, target margin, actual margin, markup, currency, and pricing-model metadata.
-- Wallet balances and ledger entries use integer minor units and Firestore transactions. Idempotency keys prevent duplicate deposits, debits, refunds, and administrative adjustments.
+- The required gross-margin target remains 40% (`4,000` basis points).
+- Selling price is calculated as `provider cost / 0.60`, in integer minor units with upward rounding.
+- Wallets, ledgers, orders, refunds and analytics use integer minor units.
+- Flutterwave credits are accepted only after server-side verification of status, amount, currency and reference. Crypto wallet credits require chain verification and explicit administrator approval.
+- PayPal funding remains unavailable for NGN wallets; its signed webhook is retained only for safe legacy reconciliation.
 
-### Payments
+### Finance analytics version 2
 
-- Flutterwave is the active hosted-checkout wallet-funding integration when `PAYMENTS_ENABLED=true`.
-- Initialization creates a server-side payment intent. Callback and webhook paths verify the provider transaction, status, amount, currency, and transaction reference before invoking the same idempotent credit function.
-- PayPal initialization is intentionally disabled for NGN wallets, and its callback only redirects to an unavailable state. The signed webhook remains for safe reconciliation of legacy PayPal intents and reversals.
-- Crypto funding supports USDT on TRC20, BEP20, and Solana plus BTC. Quotes expire, transaction hashes are deduplicated, chain data is verified, and wallet credit requires an administrator approval that re-verifies the transaction.
-- No real or sandbox financial transaction was initiated during recovery.
+Authoritative inputs are `orders` for charges/status/provider acceptance, posted NGN `walletTransactions` for deposits/refunds, and current NGN `wallets.availableMinor` for point-in-time customer liability.
 
-### Orders, refills, support, and administration
+Derived values are:
 
-- Order creation validates service availability, compliance/price state, quantity, URL, wallet currency, and funds inside a transaction before one provider submission.
-- Definite provider rejection triggers an idempotent refund; uncertain network outcomes enter `provider_confirmation_required` to prevent duplicate provider orders.
-- Order synchronization is grouped by provider and bounded to 100 orders per cron execution. Terminal refunds require confirmed, valid provider data.
-- Refill and cancellation actions require ownership and service capability flags. Refill status polling is bounded to 100 items per cron execution.
-- Dashboard support tickets enforce ownership, validate attachments, store ticket/message records atomically, and notify customer/admin. Admin replies and status changes require the admin claim.
-- Admin routes cover overview, services, provider operations, finance, wallets, transactions, crypto approvals, support, SEO, email marketing, and operational metrics.
+- `net sales = order value - customer refunds`;
+- `capital deployed = provider cost on provider-accepted orders only`;
+- `gross profit = net sales - capital deployed`;
+- `gross margin = gross profit / net sales`, reported as N/A when net sales are zero or negative;
+- `active capital = incurred provider cost on non-terminal provider orders`.
 
-## Most recent completed work
+All reporting periods use Africa/Lagos calendar boundaries. Last 7/30/90 day ranges include today plus the preceding 6/29/89 calendar days. Current wallet liability is a point-in-time value and is not summed across days.
 
-Commit `85fff98` contains the interrupted task's final production-quality changes:
+Normal Finance page loads are read-only and use one global health/total document, at most four compact monthly documents for 90 days, at most 25 recent matching orders, and aggregate queries only for a selected order status.
 
-- consolidated legacy PayPal webhook credits through the authoritative payment-credit function and disabled the unsafe/unavailable PayPal return flow;
-- expanded service catalogue quality, compliance, duplicate, pricing-anomaly, and public-name normalization rules;
-- enforced public eligibility during synchronization and removed stale public entries when a service becomes ineligible;
-- preserved the centralized 40% gross-margin calculation throughout sync and ordering;
-- made mass-order processing continue safely after individual row failures and report no-charge failures accurately;
-- added refund-confirmation safeguards for terminal provider statuses;
-- added privacy-safe, deduplicated analytics for registration, catalogue, orders, and support events;
-- improved customer order status and provider-operation handling;
-- refreshed sitemap dates and production-facing service categories.
+Historical reconstruction is never triggered by a page view. The explicit administrator action obtains a 30-minute lock, scans orders and ledger transactions in pages of 250, writes versioned daily/monthly/global values, adds canonical finance fields to orders without changing charges/provider IDs/statuses/ledger entries, preserves customer-growth counters, and marks the backfill complete only after all writes succeed. An independent aggregate reconciliation then records MATCH or DRIFT.
 
-The preceding production release, `9b274fe`, hardened dependencies and the Resend webhook. Earlier commits added bounded Firestore reads, compact catalogue snapshots, provider fingerprints, wallet/refund auditing, provider-ID masking, and gross-margin standardization.
+Provider cost is recorded only after a provider returns a valid order ID. Creation, provider acceptance, status transitions, wallet entries and refunds remain idempotent. Status rollups compare the stored order status inside the same transaction, allowing legitimate later status cycles while suppressing retries.
 
-## Verification performed during recovery
+## Work completed in this candidate
 
-### Automated gates
+- Removed page-load finance bootstrapping and false-zero fallbacks.
+- Added Finance rollup version 2 with deterministic daily/monthly/global rebuilds and reconciliation metadata.
+- Corrected deployed/active capital so pre-provider failures carry zero cost and accepted failed/refunded orders preserve incurred cost.
+- Made refund totals ledger-authoritative and persisted per-order refunded amounts for status-filtered reporting.
+- Corrected Lagos reporting boundaries and status-filtered totals.
+- Added Finance health, reconciliation and controlled rebuild controls.
+- Made Excel summary totals authoritative even when 1,000-row detail sheets truncate; labels are provider-neutral and truncation is disclosed.
+- Added a central metric quality registry and read-only `/admin/data-quality` page.
+- Replaced misleading sample counts with exact aggregate or exact-cached totals across overview, crypto, support, marketing, provider and operations pages.
+- Separated provider configuration, live connectivity, balance, synchronized inventory and last-successful-sync states.
+- Preserved compact catalogue snapshots and recorded a deduplicated public-eligible count after successful synchronization.
+- Added composite indexes for status/date finance aggregates, all-time status aggregates, provider-accepted cost, NGN transaction aggregates and support totals.
+- Preserved the 40% gross-margin rule without changing credentials or production settings.
+
+## Validation status
 
 | Gate | Result |
 | --- | --- |
-| Unit/integration tests | 25 files passed; 109 tests passed |
-| TypeScript | Passed (`tsc --noEmit`) |
-| ESLint | Passed |
-| Production build | Passed; 88 routes generated |
-| Git after checks | Clean; `HEAD` and locally recorded `origin/main` both at `85fff98` |
+| Regression coverage | Added accepted/rejected/full-refund/partial-refund/Lagos-period/rollup-quality cases |
+| Full test suite | Passed after final hardening: 27 files / 141 tests |
+| TypeScript | Passed after the final patch (`tsc --noEmit`) |
+| ESLint | Passed after the final patch |
+| Next.js build | Passed completely: optimized bundle, TypeScript, page-data collection and all 88 static pages |
+| Firestore index JSON | Valid |
+| Diff / whitespace | Passed |
+| Tracked-file secret scan | No private-key or common live-token pattern found |
+| Production dependency audit | Passed: 0 vulnerabilities |
+| Full dependency audit | 25 development-tool advisories (1 moderate, 22 high, 2 critical); some have no available fix and no automatic fix was applied |
+| Index deployment/readiness | Passed: deployed index configuration verified READY in `socialbooster-cbcc6` |
+| Vercel production deployment | Pending |
+| Production rebuild/reconciliation | Pending protected administrator action |
 
-The test suite covers money and gross margin, provider parsing, service quality, service synchronization, wallet idempotency, Firestore rules, Firebase admin safeguards, Flutterwave verification primitives, crypto calculations, refunds, customer API behavior, pagination, order statuses, email policy, analytics safety, marketing, mass orders, and support attachments.
+## Workflow verification and safety limits
 
-### Live read-only checks
+| Workflow | Current evidence |
+| --- | --- |
+| Registration / login | Existing Firebase/session flows remain unchanged; no production account was created. |
+| Catalogue / pricing | Snapshot/quality architecture preserved; 40% target remains centralized. No provider sync ran. |
+| Orders | Debit, provider acceptance and status accounting were reviewed and compiled. No live order ran. |
+| Provider sync | Followspanel, Nitro and SMM World integrations remain in existing configuration. No live sync ran. |
+| Wallets / payments / refunds | Ledger remains authoritative and idempotent. No balance or payment changed. |
+| Refills / cancellations | Existing ownership/capability checks remain. No provider action was sent. |
+| Support / admin | Totals use exact aggregates and bounded lists. Admin claims remain mandatory. |
+| Finance rebuild | Controlled, versioned, locked and additive; incomplete until production reconciliation reports MATCH. |
 
-- The latest Vercel production deployment is `READY`, sourced from `main` at commit `85fff98`.
-- The homepage, services catalogue, pricing, login, and registration pages rendered successfully.
-- The live catalogue returned 12,298 matching public services and displayed NGN prices, limits, public identifiers, and refill availability.
-- Signed-out `/dashboard` and `/admin` requests redirected to `/login`.
-- `robots.txt`, `sitemap.xml`, and `llms.txt` returned HTTP 200 through Vercel's read-only fetch path.
-- The sitemap index referenced pages, platforms, Africa, guides, and service sitemaps.
-- No authenticated form was submitted and no production mutation was attempted.
+## Firestore read-budget assessment
 
-## Workflow status and limits
+These are architecture-based upper-bound estimates for a normal page load, not Firebase billing measurements. The production rebuild is excluded because it is an explicit, one-time, data-dependent administrative operation.
 
-| Workflow | Recovery status | Evidence / limitation |
-| --- | --- | --- |
-| Registration | Structurally verified | Live form rendered; Firebase create-user, profile update, verification email fallback, session exchange, and post-login bootstrap compile. No production account was created. |
-| Login | Structurally verified | Live email/password and Google controls rendered; protected pages redirected correctly. No credentials were used. |
-| Service catalogue | Verified read-only | Live catalogue returned 12,298 services; snapshot loading, search, pagination, detail resolution, and quality rules pass build/tests. |
-| Pricing | Verified locally and live | Live NGN prices render; all nine money tests pass; 40% gross-margin formula remains authoritative. |
-| Orders | Verified by code/tests only | Transactional debit, idempotency, provider submission, uncertain-outcome handling, and refund paths pass available checks. No live order was placed. |
-| Provider synchronization | Recovered, not rerun | Three providers are configured in code; prior release evidence reports 3/3 successful. A recovery-time sync would have mutated Firestore and contacted providers. |
-| Wallets | Verified by code/tests only | Six wallet tests pass; transaction/ledger/audit writes are transactional and idempotent. No balance was changed. |
-| Payment verification | Verified by code/tests only | Flutterwave signature/reference primitives and centralized credit checks pass. No payment was initialized or verified against a real transaction. |
-| Crypto funding | Verified by code/tests only | Quote/credit tests pass; final credit requires chain re-verification and admin approval. No quote or transaction was submitted. |
-| Refills/cancellations | Structurally verified | Ownership, capability flags, deduplication, confirmation-required states, notifications, and bounded polling are present. No provider action was triggered. |
-| Support tickets | Structurally verified | Customer/admin authorization, attachment validation, atomic writes, email notifications, and status controls compile; attachment tests pass. No ticket was created. |
-| Admin operations | Access boundary verified | Signed-out access redirects to login; admin claim checks are centralized. Authenticated admin workflows were not exercised without an authorized test account. |
+| Workflow | Expected reads after repair |
+| --- | ---: |
+| Admin overview | About 7 by default; below 30 for supported growth ranges |
+| Finance dashboard | About 27 by default; below 50, including a selected-status aggregate |
+| Support inbox | Up to 28 |
+| Crypto administration | Up to 28 |
+| Email marketing overview | Up to 27 on a five-minute cache refresh; near zero database reads on a warm cache |
+| Manual reconciliation | Low hundreds at the current catalogue shape: compact totals plus provider snapshot chunks |
 
-## Known issues and documentation drift
+The rebuild reads every authoritative order and wallet transaction once, performs one wallet aggregate, and writes canonical order fields plus affected daily/monthly/global rollups. Its exact cost must be recorded from the production result rather than estimated. Normal request paths remain comfortably below the requested 5,000-read safety target; sustained daily consumption still depends on real traffic and must be checked in Firebase billing/usage telemetry.
 
-1. `README.md` is still the default Create Next App text and does not describe the production system.
-2. `docs/LAUNCH_CHECKLIST.md` still contains unchecked items that conflict with later verified release work and should be reconciled rather than treated as current truth.
-3. `docs/PAYPAL_SETUP.md` describes active PayPal checkout, but PayPal initialization is now intentionally unavailable for NGN wallets. The document should be rewritten as legacy-webhook/reconciliation guidance or archived.
-4. The setup documents still use the older `socialbooster-sigma.vercel.app` address in examples. The canonical production URL is `https://www.socialbooster.net.ng`.
-5. No browser end-to-end test suite is configured in `package.json`; authenticated workflows currently rely on unit/integration coverage, compilation, manual checks, and guarded production verification.
-6. The live catalogue sample still contains some awkward provider-derived names and near-duplicate entries. The latest quality rules are deployed, but the next controlled provider sync should be observed to confirm the new rules fully republish the catalogue without exposing ineligible services.
-7. The prior release reported 12,356 provider services processed, while the current public catalogue shows 12,298 matching services. This can be normal provider churn or stricter quality filtering, but it should be reconciled from provider-sync metrics before any catalogue intervention.
-8. Machine-readable routes were blocked by the local in-app browser client, but independent Vercel fetches returned HTTP 200. This was a verification-tool limitation, not a confirmed site outage.
+## Known issues and release blockers
 
-## Outstanding work, split into small phases
+1. Production Finance must show rebuild-required until version 2 reconstruction is explicitly run; old rollups must not be trusted.
+2. Vercel must build the exact release commit successfully before production promotion is considered complete.
+3. An authenticated administrator is required for the production rebuild/reconciliation. Without one, status remains REQUIRES ATTENTION.
+4. No browser E2E suite exists. Live checks must remain read-only and avoid financial/provider submissions.
+5. README and old setup documents have historical drift and should be reconciled separately.
+6. Do not apply automatic major-version dependency fixes inside this focused Finance patch.
 
-### Phase 1 — Documentation reconciliation (safe, no production mutation)
+## Next steps in small phases
 
-- Replace the starter README with the recovered architecture, setup, verification, and rollback summary.
-- Update the launch checklist from current evidence and mark externally owned checks explicitly.
-- Rewrite PayPal documentation to match the intentionally disabled NGN checkout and legacy webhook behavior.
-- Update old example domains to the canonical production domain.
-- Run lint, typecheck, tests, and build; commit only documentation changes separately.
+### Phase 1 — Final local gate
 
-### Phase 2 — Authenticated non-financial QA (requires an authorized test account)
+- Re-run TypeScript, ESLint and all tests where child-process execution is available.
+- Run production/full dependency audits without automatic fixes.
+- Review the final diff for secrets, credentials and production data.
 
-- Verify registration, email verification, password reset, email/password login, Google login, session expiry, and logout.
-- Verify customer catalogue search, pagination, service details, profile/preferences, support ticket creation/reply/close, and attachment authorization.
-- Verify admin claim enforcement and read-only admin dashboards.
-- Do not use customer accounts or real personal data.
+### Phase 2 — Index-first release
 
-### Phase 3 — Provider and catalogue observation (controlled production window)
+- Deploy only `firestore.indexes.json` to `socialbooster-cbcc6`.
+- Wait for every new index to report READY.
+- Do not run the Finance rebuild while indexes are building.
 
-- Capture current provider balances, sync state, catalogue hashes, read/write metrics, and previous-good snapshot metadata.
-- Run at most one authorized manual synchronization or observe the scheduled run.
-- Confirm 3/3 provider outcomes, service counts, quality-filter counts, public snapshot publication, and 40% gross-margin invariants.
-- Sample public names and duplicates after the sync; fix only reproducible normalization defects with focused tests.
+### Phase 3 — Application release
 
-### Phase 4 — Payment and wallet sandbox verification
+- Commit and push the focused patch to `main`.
+- Require a successful Vercel build from that exact commit.
+- Confirm public routes and signed-out protection without form submissions.
 
-- Use Flutterwave test mode and a dedicated test user/wallet.
-- Verify initialization, callback, signed webhook, wrong reference, wrong amount, duplicate event, recovery, and exactly-once wallet credit.
-- Exercise crypto only with explicitly approved test assets/networks; never send funds to production addresses for routine QA.
-- Reconcile payment intents, events, wallet transactions, immutable ledger records, emails, and audit entries after each case.
+### Phase 4 — Controlled production reconciliation
 
-### Phase 5 — Order/refill sandbox verification
+- Sign in with an authorized administrator account.
+- Run reconciliation first; if drift/version unavailable, run one controlled rebuild.
+- Confirm version 2, backfill complete and reconciliation MATCH.
+- Record reads, writes, dates, totals and timestamps. Never edit ledger/order totals manually.
 
-- Select one permitted low-value provider service using an approved test wallet.
-- Verify exactly-once debit and provider submission, status synchronization, cancellation capability handling, refill creation/status, and terminal refund confirmation.
-- Stop immediately on an uncertain provider response; use existing `provider_confirmation_required` recovery instead of resubmitting.
+### Phase 5 — Read-only cross-page QA
 
-### Phase 6 — Release only confirmed fixes
+- Verify Finance ranges/status filters/export and all admin metric labels/freshness.
+- Inspect runtime logs for missing-index, permission, serialization or reconciliation errors.
 
-- Keep fixes narrowly scoped and covered by a regression test.
-- Re-run all four quality gates.
-- Review the Git diff and confirm no secrets, customer data, generated credentials, or environment values are tracked.
-- Obtain explicit authorization before deploying or performing any live financial/provider mutation.
-- Record the new commit and deployment IDs in this handoff.
+### Phase 6 — Separate follow-up
+
+- Add emulator-backed concurrent transition tests and authenticated browser E2E coverage.
+- Reconcile README/setup documentation.
+- Address development-tool advisories only in a dedicated upgrade task.
 
 ## Safety rules for the next session
 
-- Do not reset Git, discard unknown changes, delete files, or rewrite history.
-- Do not migrate Firebase/Firestore to Supabase as part of recovery.
-- Do not expose Firebase Admin, provider, Resend, Flutterwave, PayPal, crypto-provider, cron, analytics, or Sentry secrets.
-- Do not modify wallets, ledger records, payment intents/events, orders, refills, provider services, or customer records directly in production.
-- Do not weaken payment verification, ownership checks, admin-claim checks, webhook signatures, idempotency, or audit logging.
-- Preserve the 40% gross-margin formula and integer-minor-unit money model.
-- Do not deploy, run a manual provider sync, place an order, submit a refill/cancellation, approve crypto, or initiate a real payment without explicit authorization and a rollback/reconciliation plan.
-
+- Do not reset Git, rewrite history, discard unknown changes or delete files.
+- Do not expose Firebase, provider, email, Flutterwave, crypto, cron, analytics or Vercel secrets.
+- Do not directly alter wallets, ledgers, payments, balances, orders, refills or provider records.
+- Do not trigger real payments, orders, cancellations, refills, crypto approvals or catalogue syncs for validation.
+- Preserve integer-minor-unit accounting and the 40% gross-margin rule.
+- Treat rollups as caches; authoritative order, ledger and wallet records take precedence.
+- If reconciliation does not MATCH, stop and report exact drift; never hide it with manual edits.
