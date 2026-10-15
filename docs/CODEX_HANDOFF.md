@@ -13,9 +13,10 @@ The interrupted work was recovered from the existing checkout. Nothing was rebui
 | Branch / upstream | `main` / `origin/main` |
 | Recovered baseline | `7c4e63a400142e0f2b39743b6323cc96e1eaf778` — `Document catalogue safety release` |
 | Finance implementation commit | `b92b79d` — `Repair finance analytics and admin metrics` |
+| Released handoff commit | `984df3b782228d5662ef7c569381cdfd1b659359` — `Document finance repair release gates` |
 | Firebase project | `socialbooster-cbcc6` |
 | Production site | `https://www.socialbooster.net.ng` |
-| Working tree | Finance implementation and release handoff are committed locally; production release gates are recorded below |
+| Working tree | Production Finance was rebuilt and reconciled; a focused missing catalogue-count cache initializer is awaiting release and final verification |
 
 No real payment, order, refill, cancellation, provider submission, crypto approval, wallet mutation, customer-data mutation, or manual provider synchronization was used during this repair.
 
@@ -75,6 +76,7 @@ Provider cost is recorded only after a provider returns a valid order ID. Creati
 - Added Finance health, reconciliation and controlled rebuild controls.
 - Made Excel summary totals authoritative even when 1,000-row detail sheets truncate; labels are provider-neutral and truncation is disclosed.
 - Added a central metric quality registry and read-only `/admin/data-quality` page.
+- Made reconciliation initialize an absent active-service count cache from the trusted versioned public snapshots without overwriting an existing count or synchronizing providers.
 - Replaced misleading sample counts with exact aggregate or exact-cached totals across overview, crypto, support, marketing, provider and operations pages.
 - Separated provider configuration, live connectivity, balance, synchronized inventory and last-successful-sync states.
 - Preserved compact catalogue snapshots and recorded a deduplicated public-eligible count after successful synchronization.
@@ -86,31 +88,31 @@ Provider cost is recorded only after a provider returns a valid order ID. Creati
 | Gate | Result |
 | --- | --- |
 | Regression coverage | Added accepted/rejected/full-refund/partial-refund/Lagos-period/rollup-quality cases |
-| Full test suite | Passed after final hardening: 27 files / 141 tests |
-| TypeScript | Passed after the final patch (`tsc --noEmit`) |
-| ESLint | Passed after the final patch |
-| Next.js build | Passed completely: optimized bundle, TypeScript, page-data collection and all 88 static pages |
+| Full test suite | Passed after final cache hardening: 27 files / 141 tests |
+| TypeScript | Passed after the final cache patch (`tsc --noEmit`) |
+| ESLint | Passed after the final cache patch |
+| Next.js build | Passed after the final cache patch: optimized bundle, TypeScript, page-data collection and all 88 static pages |
 | Firestore index JSON | Valid |
 | Diff / whitespace | Passed |
 | Tracked-file secret scan | No private-key or common live-token pattern found |
 | Production dependency audit | Passed: 0 vulnerabilities |
 | Full dependency audit | 25 development-tool advisories (1 moderate, 22 high, 2 critical); some have no available fix and no automatic fix was applied |
 | Index deployment/readiness | Passed: deployed index configuration verified READY in `socialbooster-cbcc6` |
-| Vercel production deployment | Pending |
-| Production rebuild/reconciliation | Pending protected administrator action |
+| Vercel production deployment | Passed for exact commit `984df3b`: deployment `dpl_2BLjMrf8rDfoaZqk6MjvWRa5q87U` is READY and assigned to the production domains |
+| Production rebuild/reconciliation | Rollup version 2 and historical backfill completed. All Finance values and all available cross-page values match; the pre-existing active-service cache was unavailable and its safe initializer is pending release. |
 
 ## Workflow verification and safety limits
 
 | Workflow | Current evidence |
 | --- | --- |
-| Registration / login | Existing Firebase/session flows remain unchanged; no production account was created. |
-| Catalogue / pricing | Snapshot/quality architecture preserved; 40% target remains centralized. No provider sync ran. |
+| Registration / login | Production `/login` and `/register` return successfully; signed-out admin navigation redirects to login. No production account was created. |
+| Catalogue / pricing | Snapshot/quality architecture preserved; authoritative public snapshot count is 2,310 and the 40% target remains centralized. No provider sync ran. |
 | Orders | Debit, provider acceptance and status accounting were reviewed and compiled. No live order ran. |
 | Provider sync | Followspanel, Nitro and SMM World integrations remain in existing configuration. No live sync ran. |
 | Wallets / payments / refunds | Ledger remains authoritative and idempotent. No balance or payment changed. |
 | Refills / cancellations | Existing ownership/capability checks remain. No provider action was sent. |
 | Support / admin | Totals use exact aggregates and bounded lists. Admin claims remain mandatory. |
-| Finance rebuild | Controlled, versioned, locked and additive; incomplete until production reconciliation reports MATCH. |
+| Finance rebuild | Controlled, versioned, locked and additive; version 2 backfill completed and every Finance metric reconciled exactly. |
 
 ## Firestore read-budget assessment
 
@@ -129,12 +131,10 @@ The rebuild reads every authoritative order and wallet transaction once, perform
 
 ## Known issues and release blockers
 
-1. Production Finance must show rebuild-required until version 2 reconstruction is explicitly run; old rollups must not be trusted.
-2. Vercel must build the exact release commit successfully before production promotion is considered complete.
-3. An authenticated administrator is required for the production rebuild/reconciliation. Without one, status remains REQUIRES ATTENTION.
-4. No browser E2E suite exists. Live checks must remain read-only and avoid financial/provider submissions.
-5. README and old setup documents have historical drift and should be reconciled separately.
-6. Do not apply automatic major-version dependency fixes inside this focused Finance patch.
+1. Deploy the focused missing-cache initializer and rerun reconciliation so the exact 2,310-service snapshot count becomes available to the Admin overview without a provider sync.
+2. No browser E2E suite exists. Live checks must remain read-only and avoid financial/provider submissions.
+3. README and old setup documents have historical drift and should be reconciled separately.
+4. Do not apply automatic major-version dependency fixes inside this focused Finance patch.
 
 ## Next steps in small phases
 

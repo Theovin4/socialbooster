@@ -41,6 +41,8 @@ describe("analytics truthfulness", () => {
       expect(reconciliation).toContain(metric);
     }
     expect(reconciliation).toContain("authoritativePublicCatalogCount");
+    expect(reconciliation).toContain("initializeMissingPublicCatalogStats");
+    expect(reconciliation).toContain('countSource: "versioned_public_catalog_snapshots"');
     expect(reconciliation).toContain("choosePreferredDuplicateServices");
   });
 });

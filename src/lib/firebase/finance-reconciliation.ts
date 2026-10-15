@@ -250,6 +250,24 @@ async function authoritativePublicCatalogCount() {
   ).length;
 }
 
+async function initializeMissingPublicCatalogStats(publicEligibleCount: number) {
+  const db = adminDb();
+  const ref = db.collection("publicCatalogStats").doc("current");
+  return db.runTransaction(async (transaction) => {
+    const snapshot = await transaction.get(ref);
+    const stored = snapshot.get("publicEligibleCount");
+    if (typeof stored === "number" && Number.isSafeInteger(stored) && stored >= 0) return stored;
+    transaction.set(ref, {
+      publicEligibleCount,
+      qualityState: "EXACT_CACHED",
+      countSource: "versioned_public_catalog_snapshots",
+      initializedAt: FieldValue.serverTimestamp(),
+      updatedAt: FieldValue.serverTimestamp(),
+    }, { merge: true });
+    return publicEligibleCount;
+  });
+}
+
 async function acquireRebuildLock() {
   const db = adminDb();
   const ref = db.collection("analytics").doc(ANALYTICS_GLOBAL);
@@ -401,10 +419,9 @@ async function authoritativeAggregates(): Promise<FinanceRollupMetrics> {
 
 export async function reconcileFinanceRollups() {
   const db = adminDb(), ref = db.collection("analytics").doc(ANALYTICS_GLOBAL);
-  const [snapshot, stats, catalogue, authoritative, publicCatalogCount, supportOpen, cryptoApproved, marketingEligible] = await Promise.all([
+  const [snapshot, stats, authoritative, publicCatalogCount, supportOpen, cryptoApproved, marketingEligible] = await Promise.all([
     ref.get(),
     db.collection("stats").doc("totals").get(),
-    db.collection("publicCatalogStats").doc("current").get(),
     authoritativeAggregates(),
     authoritativePublicCatalogCount(),
     db.collection("supportTickets").where("status", "==", "open").count().get(),
@@ -416,9 +433,10 @@ export async function reconcileFinanceRollups() {
   const supportOpenCount = safeInteger(supportOpen.data().count);
   const cryptoApprovedCount = safeInteger(cryptoApproved.data().count);
   const marketingEligibleCount = safeInteger(marketingEligible.data().count);
+  const displayedPublicCatalogCount = await initializeMissingPublicCatalogStats(publicCatalogCount);
   const crossPage = {
     adminTotalOrders: comparison(adminOrderCount, authoritative.orderCount),
-    activeServices: comparison(catalogue.get("publicEligibleCount"), publicCatalogCount),
+    activeServices: comparison(displayedPublicCatalogCount, publicCatalogCount),
     supportOpen: comparison(supportOpenCount, supportOpenCount),
     cryptoApproved: comparison(cryptoApprovedCount, cryptoApprovedCount),
     marketingEligible: comparison(marketingEligibleCount, marketingEligibleCount),
