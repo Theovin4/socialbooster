@@ -1,0 +1,29 @@
+import { AppShell } from "@/components/app-shell";
+import { getAcquisitionOverview } from "@/lib/acquisition-admin";
+import { formatMoney } from "@/lib/money";
+import { reviewReferralReward, updateReferralRules } from "./actions";
+
+export const dynamic = "force-dynamic";
+
+type Row = Awaited<ReturnType<typeof getAcquisitionOverview>>["firstTouch"][number];
+
+function money(value: number) {
+  return formatMoney(BigInt(Math.round(value)), "NGN");
+}
+
+function AcquisitionTable({ title, description, rows }: { title: string; description: string; rows: Row[] }) {
+  return <section className="glass data-table-wrap" style={{ marginTop: 22 }}><div style={{ padding: "20px 20px 0" }}><h2>{title}</h2><p className="muted">{description}</p></div><table className="data-table"><thead><tr><th>Source</th><th>Medium</th><th>Campaign</th><th>Visitors</th><th>Registrations</th><th>First orders</th><th>Repeat orders</th><th>Revenue</th><th>Gross profit</th></tr></thead><tbody>{rows.length ? rows.map((row) => <tr key={row.id}><td>{row.source}</td><td>{row.medium}</td><td>{row.campaign}</td><td>{row.visitors == null ? "GA4 only" : row.visitors.toLocaleString("en-NG")}</td><td>{row.registrations.toLocaleString("en-NG")}</td><td>{row.firstOrders.toLocaleString("en-NG")}</td><td>{row.repeatOrders.toLocaleString("en-NG")}</td><td>{money(row.revenueMinor)}</td><td>{money(row.grossProfitMinor)}</td></tr>) : <tr><td colSpan={9}>No attributed registrations have been recorded yet.</td></tr>}</tbody></table></section>;
+}
+
+export default async function AcquisitionPage() {
+  const overview = await getAcquisitionOverview();
+  const rules = overview.rules;
+  return <AppShell admin><span className="eyebrow">Growth measurement</span><h1 className="page-heading">Acquisition</h1><p className="muted page-lead">Consent-aware first-touch and last-touch registration and completed-order outcomes. Wallet funding is never counted as revenue.</p>
+    <div className="grid3" style={{ marginTop: 22 }}><article className="glass card stat-card"><span className="muted">Referred registrations</span><strong className="stat-value">{overview.referrals.toLocaleString("en-NG")}</strong></article><article className="glass card stat-card"><span className="muted">First-order qualified</span><strong className="stat-value">{overview.qualifiedReferrals.toLocaleString("en-NG")}</strong></article><article className="glass card stat-card"><span className="muted">Reseller interest</span><strong className="stat-value">{overview.resellerInterests.toLocaleString("en-NG")}</strong></article></div>
+    <p className="muted" style={{ marginTop: 10 }}>Top 50 attribution rows per model, cached for five minutes · as of {new Date(overview.asOf).toLocaleString("en-NG", { timeZone: "Africa/Lagos" })}. Visitor counts remain in consented GA4 reporting; Firestore does not log pageviews.</p>
+    <AcquisitionTable title="First-touch acquisition" description="The original consented campaign associated with registration and later completed orders." rows={overview.firstTouch} />
+    <AcquisitionTable title="Last-touch acquisition" description="The most recent consented campaign before account creation." rows={overview.lastTouch} />
+    <section className="glass card" style={{ marginTop: 22 }}><div className="section-head"><div><span className="eyebrow">Referral safeguards</span><h2>Reward rules</h2></div><span className="status-pill">{overview.pendingRewards.toLocaleString("en-NG")} pending review</span></div><p className="muted">A signup never earns a reward. A referred customer must complete their first order, pass eligibility checks and enter manual review. This workflow never credits a wallet automatically.</p><form action={updateReferralRules} className="form-grid"><label>Program<select className="field" name="enabled" defaultValue={String(rules.enabled)}><option value="false">Disabled</option><option value="true">Enabled</option></select></label><label>Reward (NGN)<input className="field" name="rewardNgn" inputMode="decimal" defaultValue={(rules.rewardMinor / 100).toFixed(2)} required /></label><label>Minimum first order (NGN)<input className="field" name="minimumFirstOrderNgn" inputMode="decimal" defaultValue={(rules.minimumFirstOrderMinor / 100).toFixed(2)} required /></label><label>Qualification delay (days)<input className="field" name="qualificationDelayDays" type="number" min="0" max="90" defaultValue={rules.qualificationDelayDays} required /></label><label>Monthly qualification cap<input className="field" name="monthlyRewardLimit" type="number" min="1" max="1000" defaultValue={rules.monthlyRewardLimit} required /></label><div className="form-span"><button className="btn primary">Save reviewed rules</button></div></form></section>
+    <section className="glass card" style={{ marginTop: 22 }}><h2>Pending reward reviews</h2><p className="muted">Approval records an audited decision only. It never moves wallet funds; any authorized credit must use the existing audited wallet-adjustment process.</p><div style={{ display: "grid", gap: 12 }}>{overview.pendingRewardItems.length ? overview.pendingRewardItems.map((reward) => <form action={reviewReferralReward} key={reward.id} style={{ display: "grid", gridTemplateColumns: "minmax(150px, 1fr) minmax(220px, 2fr) auto auto", gap: 10, alignItems: "center" }}><input type="hidden" name="id" value={reward.id} /><span><strong>{reward.referralCode}</strong><br /><small className="muted">{money(reward.amountMinor)} · order {reward.firstCompletedOrderId.slice(0, 8)}</small></span><input className="field" name="reason" minLength={5} maxLength={300} placeholder="Required review reason" required /><button className="btn primary" name="decision" value="approve">Approve for manual credit</button><button className="btn" name="decision" value="reject">Reject</button></form>) : <p className="muted">No rewards are waiting for review.</p>}</div></section>
+  </AppShell>;
+}

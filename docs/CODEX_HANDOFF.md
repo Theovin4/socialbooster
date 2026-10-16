@@ -1,6 +1,6 @@
 # Social Booster Codex handoff
 
-Snapshot date: 15 October 2026 (Africa/Lagos)
+Snapshot date: 16 October 2026 (Africa/Lagos)
 
 ## Recovery and repository state
 
@@ -15,9 +15,10 @@ The interrupted work was recovered from the existing checkout. Nothing was rebui
 | Finance implementation commit | `b92b79d` — `Repair finance analytics and admin metrics` |
 | Released handoff commit | `984df3b782228d5662ef7c569381cdfd1b659359` — `Document finance repair release gates` |
 | Catalogue-cache completion commit | `73463b6591234ebb74808cec2d6bfedc9388737d` — `Initialize missing catalogue analytics cache` |
+| Growth-pass baseline | `9026abfe466a6f3b4bd6450a99daebe2bfbf810c` — `Finalize finance repair handoff` |
 | Firebase project | `socialbooster-cbcc6` |
 | Production site | `https://www.socialbooster.net.ng` |
-| Working tree | Implementation is released and production-verified; only this final handoff update follows the verified code commit |
+| Working tree | Growth enablement candidate complete and locally verified; not deployed and no production data changed |
 
 No real payment, order, refill, cancellation, provider submission, crypto approval, wallet mutation, customer-data mutation, or manual provider synchronization was used during this repair.
 
@@ -140,6 +141,37 @@ There is no remaining Finance release blocker.
 2. README and old setup documents have historical drift and should be reconciled separately.
 3. The full dependency audit still reports 25 development-tool advisories (1 moderate, 22 high, 2 critical), including packages without an automatic fix. Production dependencies report zero vulnerabilities.
 4. Exact one-time rebuild I/O counters were not recoverable after the short runtime-log retention window; use Firebase usage telemetry for billing evidence.
+
+## Growth enablement pass — 16 October 2026
+
+The growth pass is additive and does not change core finance, wallet, provider, Firebase catalogue optimization, pricing or payment architecture.
+
+- GA4 now records consented page views plus registration, wallet-funding success, order success, purchase, first-order, repeat-purchase and reseller-interest events. GA4 page views remain browser-only; no Firestore pageview collection or write exists.
+- First-touch and last-touch UTM context is sanitized, consent-gated, stored in the browser, submitted during authenticated session establishment and persisted on the customer marketing profile. Referral and reseller intent are essential attribution context with bounded values; referral context expires after 30 days.
+- Registration and completed-order transactions update bounded first-touch and last-touch acquisition rollups. Only completed orders add revenue and gross profit. Wallet funding never adds revenue.
+- `/admin/acquisition` reports source, medium, campaign, registrations, first orders, repeat orders, net completed-order revenue and authoritative incurred-cost gross profit. Visitor counts remain in GA4 and are labelled `GA4 only`; no Firestore traffic logging was introduced.
+- Deterministic unique referral codes, `/r/[code]` attribution, referred registrations, first-completed-order qualification, verified-email/minimum-order/delay/monthly-cap checks and manual reward review are implemented. Signup cannot qualify a reward, self-referrals are rejected by user ID and normalized email hash, and reward approval never credits a wallet automatically.
+- `/dashboard/referrals` gives customers their referral link and bounded status counts. `/resellers` now presents wallet, mass-order, API, tracking and onboarding benefits; reseller intent is captured at registration and by the `reseller_interest` analytics event.
+- Email lifecycle segments now explicitly include registered-no-order, funded-no-order, first-order, active, at-risk, inactive/dormant, repeat and reseller/API. Bulk marketing remains disabled unless its existing explicit production setting and administrator scheduling gates are satisfied.
+- Every guide now links to platform pages, pricing, resellers, API documentation, crypto payment guidance and registration.
+
+Growth-pass validation:
+
+| Gate | Result |
+| --- | --- |
+| Full test suite | Passed: 29 files / 148 tests |
+| TypeScript | Passed: `tsc --noEmit` |
+| ESLint | Passed |
+| Production build | Passed: compilation, TypeScript, page-data collection and all 88 static pages |
+| Diff / whitespace | Passed |
+| Live financial/provider testing | Not performed by design |
+| Deployment | Not performed; requires a separate authorized release step |
+
+Growth work should continue in small phases:
+
+1. Release the validated candidate without running live payments, orders, provider syncs or referral credits.
+2. After release, perform read-only GA4 DebugView and protected-page smoke checks using a test account; do not create financial transactions.
+3. Review acquisition rollups and referral fraud flags after real, consented traffic exists; adjust reward rules only through the audited administrator form.
 
 ## Next steps in small phases
 

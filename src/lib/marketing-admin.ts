@@ -14,7 +14,9 @@ function segmentQuery(segment: MarketingSegmentId): Query {
   if (segment === "at_risk") query = query.where("lastOrderAt", ">=", dayOffset(60)).where("lastOrderAt", "<", dayOffset(30));
   if (segment === "inactive") query = query.where("lastOrderAt", ">=", dayOffset(90)).where("lastOrderAt", "<", dayOffset(60));
   if (segment === "dormant") query = query.where("lastOrderAt", "<", dayOffset(90));
+  if (segment === "registered_no_order") query = query.where("completedOrderCount", "==", 0);
   if (segment === "funded_no_order") query = query.where("walletFunded", "==", true).where("completedOrderCount", "==", 0);
+  if (segment === "first_order") query = query.where("completedOrderCount", "==", 1);
   if (segment === "repeat") query = query.where("completedOrderCount", ">=", 2);
   if (segment === "vip") query = query.where("lifetimeOrderValueMinor", ">=", VIP_LIFETIME_VALUE_MINOR);
   if (segment === "reseller_api") query = query.where("resellerOrApi", "==", true);
@@ -29,7 +31,7 @@ export async function marketingSegmentCount(segment: MarketingSegmentId) {
 
 async function loadMarketingOverview() {
   const db = adminDb();
-  const segments: MarketingSegmentId[] = ["eligible", "active", "at_risk", "inactive", "dormant", "funded_no_order", "repeat", "vip", "reseller_api", "crypto"];
+  const segments: MarketingSegmentId[] = ["eligible", "active", "at_risk", "inactive", "dormant", "registered_no_order", "funded_no_order", "first_order", "repeat", "vip", "reseller_api", "crypto"];
   const [counts, unsubscribed, suppressed, campaigns] = await Promise.all([
     Promise.all(segments.map(async (segment) => [segment, await marketingSegmentCount(segment)] as const)),
     db.collection(MARKETING_PROFILE_COLLECTION).where("marketingStatus", "==", "unsubscribed").count().get(),

@@ -37,6 +37,9 @@ describe("marketing safety", () => {
     const profile = { marketingConsent: true, marketingEligible: true, marketingStatus: "active", emailStatus: "active", completedOrderCount: 3, lifetimeOrderValueMinor: 600_000, walletFunded: true, resellerOrApi: true, hasUsedCrypto: true, lastOrderAt: new Date("2026-09-20T12:00:00.000Z") };
     expect(marketingSegmentMemberships(profile, now)).toEqual(expect.arrayContaining(["eligible", "active", "repeat", "vip", "reseller_api", "crypto"]));
     expect(marketingSegmentMemberships({ ...profile, marketingConsent: false }, now)).toEqual([]);
+    expect(marketingSegmentMemberships({ ...profile, completedOrderCount: 0, lifetimeOrderValueMinor: 0, walletFunded: false, lastOrderAt: null }, now)).toEqual(expect.arrayContaining(["registered_no_order"]));
+    expect(marketingSegmentMemberships({ ...profile, completedOrderCount: 0, lifetimeOrderValueMinor: 0, walletFunded: true, lastOrderAt: null }, now)).toEqual(expect.arrayContaining(["registered_no_order", "funded_no_order"]));
+    expect(marketingSegmentMemberships({ ...profile, completedOrderCount: 1, lifetimeOrderValueMinor: 10_000 }, now)).toEqual(expect.arrayContaining(["first_order"]));
   });
 });
 

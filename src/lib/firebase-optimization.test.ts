@@ -45,4 +45,14 @@ describe("Firebase optimization architecture", () => {
     expect(mass).toContain("createAndSubmitOrder");
     expect(orders.indexOf("assertServiceOrderEligible(data)")).toBeLessThan(orders.indexOf("transaction.set(walletRef"));
   });
+
+  it("keeps GA4 pageviews out of Firestore and wallet funding out of acquisition revenue", () => {
+    const consent = readFileSync(new URL("../components/consent-manager.tsx", import.meta.url), "utf8");
+    const growth = readFileSync(new URL("./growth-server.ts", import.meta.url), "utf8");
+    expect(consent).toContain('trackAnalyticsEvent("page_view"');
+    expect(consent).not.toContain("adminDb");
+    expect(consent).not.toContain('collection("page');
+    expect(growth).not.toContain("wallet_fund");
+    expect(growth).not.toContain("paymentIntent");
+  });
 });

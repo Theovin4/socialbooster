@@ -3,7 +3,7 @@
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { useState } from "react";
-import { Activity, BadgeDollarSign, Bell, Bitcoin, Braces, ChartNoAxesCombined, ClipboardList, Gauge, Headphones, Home, Layers3, LogOut, Mail, Menu, PlusCircle, ReceiptText, RefreshCcw, SearchCheck, Settings, ShieldCheck, WalletCards, X } from "lucide-react";
+import { Activity, BadgeDollarSign, Bell, Bitcoin, Braces, ChartNoAxesCombined, ClipboardList, Gauge, Headphones, Home, Layers3, LogOut, Mail, Menu, PlusCircle, ReceiptText, RefreshCcw, SearchCheck, Settings, ShieldCheck, TrendingUp, UsersRound, WalletCards, X } from "lucide-react";
 import { Logo } from "./logo";
 
 const customerLinks = [
@@ -17,6 +17,7 @@ const customerLinks = [
   { label: "Notifications", href: "/dashboard/notifications", icon: Bell },
   { label: "Support", href: "/dashboard/support", icon: Headphones },
   { label: "API", href: "/dashboard/api", icon: Braces },
+  { label: "Referrals", href: "/dashboard/referrals", icon: UsersRound },
   { label: "Email preferences", href: "/dashboard/preferences", icon: Settings },
 ];
 
@@ -26,6 +27,7 @@ const adminLinks = [
   { label: "Transactions", href: "/admin/transactions", icon: ReceiptText },
   { label: "Wallets", href: "/admin/wallets", icon: BadgeDollarSign },
   { label: "Finance", href: "/admin/finance", icon: ChartNoAxesCombined },
+  { label: "Acquisition", href: "/admin/acquisition", icon: TrendingUp },
   { label: "Crypto payments", href: "/admin/crypto", icon: Bitcoin },
   { label: "Support", href: "/admin/support", icon: Headphones },
   { label: "Live orders", href: "/admin/provider", icon: Activity },

@@ -8,7 +8,22 @@ import { ensureApplicationUser } from "@/lib/firebase/application-user";
 import { SESSION_COOKIE } from "@/lib/firebase/session";
 import { brandedEmail, sendAdminAlert, sendBrandedEmail } from "@/lib/email";
 
-const bodySchema = z.object({ idToken: z.string().min(100) });
+const touchSchema = z.object({
+  source: z.string().max(120),
+  medium: z.string().max(120),
+  campaign: z.string().max(120),
+  content: z.string().max(120).optional(),
+  term: z.string().max(120).optional(),
+  landingPath: z.string().max(220),
+  capturedAt: z.string().max(40),
+}).strict();
+const growthSchema = z.object({
+  firstTouch: touchSchema.optional(),
+  lastTouch: touchSchema.optional(),
+  referralCode: z.string().max(30).optional(),
+  resellerInterest: z.boolean().optional(),
+}).strict();
+const bodySchema = z.object({ idToken: z.string().min(100), growth: growthSchema.optional() }).strict();
 const MAX_AGE = 60 * 60 * 24 * 5;
 
 function normalizedHost(hostname: string) {
@@ -75,9 +90,9 @@ async function notifyGoogleCustomer(token: DecodedIdToken) {
   }
 }
 
-async function completePostLogin(token: DecodedIdToken) {
+async function completePostLogin(token: DecodedIdToken, growth?: z.infer<typeof growthSchema>) {
   try {
-    const account = await ensureApplicationUser(token);
+    const account = await ensureApplicationUser(token, growth);
     if (!account.created) return;
     const tasks: Promise<unknown>[] = [notifyNewSignup(token.uid, token.email, token.name)];
     if (token.firebase?.sign_in_provider === "google.com") tasks.push(notifyGoogleCustomer(token));
@@ -91,12 +106,12 @@ async function completePostLogin(token: DecodedIdToken) {
 export async function POST(request: Request) {
   if (!trustedOrigin((await headers()).get("origin"))) return Response.json({ error: "Invalid origin" }, { status: 403 });
   try {
-    const { idToken } = bodySchema.parse(await request.json());
+    const { idToken, growth } = bodySchema.parse(await request.json());
     const decoded = await adminAuth().verifyIdToken(idToken, true);
     if (Date.now() / 1000 - decoded.auth_time > 300) return Response.json({ error: "Recent sign-in required" }, { status: 401 });
     const session = await adminAuth().createSessionCookie(idToken, { expiresIn: MAX_AGE * 1000 });
     (await cookies()).set(SESSION_COOKIE, session, { httpOnly: true, secure: process.env.NODE_ENV === "production", sameSite: "lax", path: "/", maxAge: MAX_AGE });
-    after(() => completePostLogin(decoded));
+    after(() => completePostLogin(decoded, growth));
     return Response.json({ ok: true, admin: decoded.admin === true, emailVerified: decoded.email_verified === true });
   } catch (error) {
     console.error("[auth:session] session creation failed", { error: error instanceof Error ? error.message : "Unknown error" });

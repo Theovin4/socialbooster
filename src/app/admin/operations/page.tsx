@@ -16,6 +16,8 @@ const workflows = [
   ["Support inbox", "Up to 28", "Latest 25 conversations plus three exact aggregate counts."],
   ["Crypto administration", "Up to 28", "Latest 25 records plus three exact aggregate counts; expiry is handled by cron."],
   ["Email marketing", "Up to 27 per cache refresh", "Twelve exact aggregates plus the latest 15 campaigns; cached for five minutes."],
+  ["Acquisition report", "Up to 126 documents + 4 aggregates per cache refresh", "Top 50 first-touch and last-touch rollups, up to 25 pending reviews and one settings document; cached for five minutes. No pageview documents."],
+  ["Customer referrals", "Up to 52", "A two-document idempotent code check plus at most 50 referred registrations; no unbounded scan."],
   ["Unchanged provider sync", "About 2 reads / 4 writes", "Catalogue hash short-circuits before inventory reads."],
 ] as const;
 

@@ -29,6 +29,15 @@ service cloud.firestore {
     match /adminAuditLogs/{id} { allow read, write: if false; }
     match /marketingCampaigns/{id} { allow read, write: if false; }
     match /marketingStats/{id} { allow read, write: if false; }
+    match /acquisitionFirstTouchRollups/{id} { allow read, write: if false; }
+    match /acquisitionLastTouchRollups/{id} { allow read, write: if false; }
+    match /referralCodes/{id} { allow read, write: if false; }
+    match /referralCodeIndex/{id} { allow read, write: if false; }
+    match /referrals/{id} { allow read, write: if false; }
+    match /referralRewards/{id} { allow read, write: if false; }
+    match /referralMonthly/{id} { allow read, write: if false; }
+    match /resellerInterests/{id} { allow read, write: if false; }
+    match /growthSettings/{id} { allow read, write: if false; }
     match /resendWebhookEvents/{id} { allow read, write: if false; }
     match /{document=**} { allow read, write: if false; }
   }

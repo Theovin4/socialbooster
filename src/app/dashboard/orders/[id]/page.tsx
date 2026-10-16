@@ -55,6 +55,10 @@ export default async function OrderPage({
     }
   }
   const order = snapshot.data()!;
+  const completedOrderCount = notice === "order-created"
+    ? Number((await adminDb().collection("marketingProfiles").doc(user.uid).get()).get("completedOrderCount") || 0)
+    : 0;
+  const purchaseStage = completedOrderCount > 0 ? "repeat_purchase" : "first_order";
   const quantity = Number(order.quantity || 0);
   const remaining =
     String(order.status) === "completed"
@@ -85,7 +89,7 @@ export default async function OrderPage({
     });
   return (
     <AppShell>
-      {notice === "order-created" ? <><AnalyticsEvent event="order_success" parameters={{ service_id: order.serviceId ? publicServiceId(String(order.serviceId)) : "unknown" }} deduplicationKey={`order_success:${id}`} /><AnalyticsEvent event="purchase" deduplicationKey={`purchase:${id}`} parameters={{ transaction_id: id, currency: String(order.currency || "NGN"), value: Number(order.customerPriceMinor || 0) / 100, items: [{ item_id: order.serviceId ? publicServiceId(String(order.serviceId)) : "unknown", item_name: String(order.serviceName || "Social media service"), item_category: String(order.serviceCategory || "Social media service"), quantity: Number(order.quantity || 1), price: Number(order.customerPriceMinor || 0) / 100 / Math.max(1, Number(order.quantity || 1)) }] }} /></> : null}
+      {notice === "order-created" ? <><AnalyticsEvent event="order_success" parameters={{ service_id: order.serviceId ? publicServiceId(String(order.serviceId)) : "unknown" }} deduplicationKey={`order_success:${id}`} /><AnalyticsEvent event={purchaseStage} parameters={{ transaction_id: id, customer_type: completedOrderCount > 0 ? "repeat" : "first_order" }} deduplicationKey={`${purchaseStage}:${id}`} /><AnalyticsEvent event="purchase" deduplicationKey={`purchase:${id}`} parameters={{ transaction_id: id, customer_type: completedOrderCount > 0 ? "repeat" : "first_order", currency: String(order.currency || "NGN"), value: Number(order.customerPriceMinor || 0) / 100, items: [{ item_id: order.serviceId ? publicServiceId(String(order.serviceId)) : "unknown", item_name: String(order.serviceName || "Social media service"), item_category: String(order.serviceCategory || "Social media service"), quantity: Number(order.quantity || 1), price: Number(order.customerPriceMinor || 0) / 100 / Math.max(1, Number(order.quantity || 1)) }] }} /></> : null}
       {Number(order.refundedAmountMinor || 0) > 0 ? <AnalyticsEvent event="refund" deduplicationKey={`refund:${id}:${Number(order.refundedAmountMinor)}`} parameters={{ transaction_id: id, currency: String(order.currency || "NGN"), value: Number(order.refundedAmountMinor) / 100 }} /> : null}
       {notice === "order-created" ? (
         <Toast

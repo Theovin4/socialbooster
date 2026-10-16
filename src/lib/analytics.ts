@@ -1,4 +1,7 @@
+import { normalizeAcquisitionTouch, normalizeGrowthContext, normalizeReferralCode, type GrowthContext } from "./acquisition";
+
 export const analyticsEvents = [
+  "page_view",
   "login",
   "sign_up",
   "search",
@@ -19,6 +22,8 @@ export const analyticsEvents = [
   "order_start",
   "order_success",
   "order_failure",
+  "first_order",
+  "repeat_purchase",
   "api_key_created",
   "reseller_interest",
   "support_ticket_created",
@@ -63,9 +68,59 @@ export function sanitizeAnalyticsParameters(parameters: AnalyticsParameters): An
 
 function attributionParameters() {
   try {
-    const stored = JSON.parse(window.localStorage.getItem("sb_attribution_v1") || "null") as Record<string, unknown> | null;
-    return stored ? sanitizeAnalyticsParameters(stored) : {};
+    const stored = normalizeGrowthContext(JSON.parse(window.localStorage.getItem("sb_attribution_v2") || "null"));
+    const touch = stored.lastTouch;
+    return touch ? sanitizeAnalyticsParameters({ utm_source: touch.source, utm_medium: touch.medium, utm_campaign: touch.campaign, utm_content: touch.content, utm_term: touch.term }) : {};
   } catch { return {}; }
+}
+
+export function captureClientGrowthContext(pathname: string, analyticsConsent: boolean) {
+  if (typeof window === "undefined") return;
+  const query = new URLSearchParams(window.location.search);
+  const referralCode = normalizeReferralCode(query.get("ref"));
+  if (referralCode) {
+    window.localStorage.setItem("sb_referral_v1", referralCode);
+    window.localStorage.setItem("sb_referral_captured_at_v1", new Date().toISOString());
+  }
+  if (query.get("intent") === "reseller") window.localStorage.setItem("sb_growth_intent_v1", "reseller");
+  if (!analyticsConsent) return;
+  const source = query.get("utm_source")?.trim();
+  const medium = query.get("utm_medium")?.trim();
+  const campaign = query.get("utm_campaign")?.trim();
+  if (!source && !medium && !campaign) return;
+  const touch = normalizeAcquisitionTouch({
+    source: source || "direct_or_unknown",
+    medium: medium || "none",
+    campaign: campaign || "unattributed",
+    content: query.get("utm_content"),
+    term: query.get("utm_term"),
+    landingPath: pathname,
+    capturedAt: new Date().toISOString(),
+  });
+  if (!touch) return;
+  const stored = readClientGrowthContext();
+  window.localStorage.setItem("sb_attribution_v2", JSON.stringify({ firstTouch: stored.firstTouch || touch, lastTouch: touch }));
+}
+
+export function readClientGrowthContext(): GrowthContext {
+  if (typeof window === "undefined") return {};
+  try {
+    const stored = normalizeGrowthContext(JSON.parse(window.localStorage.getItem("sb_attribution_v2") || "null"));
+    const referralCapturedAt = new Date(window.localStorage.getItem("sb_referral_captured_at_v1") || 0).getTime();
+    const referralCurrent = Number.isFinite(referralCapturedAt) && Date.now() - referralCapturedAt <= 30 * 86_400_000;
+    const referralCode = referralCurrent ? normalizeReferralCode(window.localStorage.getItem("sb_referral_v1")) : undefined;
+    if (!referralCurrent) {
+      window.localStorage.removeItem("sb_referral_v1");
+      window.localStorage.removeItem("sb_referral_captured_at_v1");
+    }
+    return {
+      ...stored,
+      ...(referralCode ? { referralCode } : {}),
+      ...(window.localStorage.getItem("sb_growth_intent_v1") === "reseller" ? { resellerInterest: true } : {}),
+    };
+  } catch {
+    return {};
+  }
 }
 
 export function trackAnalyticsEvent(event: AnalyticsEvent, parameters: AnalyticsParameters = {}, deduplicationKey?: string) {

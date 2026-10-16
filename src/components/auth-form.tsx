@@ -7,7 +7,7 @@ import { FirebaseError } from "firebase/app";
 import { browserSessionPersistence, createUserWithEmailAndPassword, getRedirectResult, GoogleAuthProvider, inMemoryPersistence, sendEmailVerification, sendPasswordResetEmail, setPersistence, signInWithEmailAndPassword, signInWithPopup, signInWithRedirect, updateProfile, type User } from "firebase/auth";
 import { Eye, EyeOff } from "lucide-react";
 import { firebaseAuth } from "@/lib/firebase/client";
-import { trackAnalyticsEvent } from "@/lib/analytics";
+import { readClientGrowthContext, trackAnalyticsEvent } from "@/lib/analytics";
 import { Toast, type ToastKind } from "./toast";
 
 type Notice = { kind: ToastKind; title: string; message: string };
@@ -34,7 +34,7 @@ export function AuthForm({ mode, initialNotice, returnTo }: { mode: "login" | "r
   function checkCaps(event: KeyboardEvent<HTMLInputElement>) { setCapsLock(event.getModifierState("CapsLock")); }
   const destination = useCallback((admin?: boolean) => { if (returnTo?.startsWith("/") && !returnTo.startsWith("//") && (admin || !returnTo.startsWith("/admin"))) return returnTo; return admin ? "/admin?notice=welcome" : "/dashboard?notice=welcome"; }, [returnTo]);
   const establishSession = useCallback(async (user: User) => {
-    const response = await fetch("/api/auth/session", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ idToken: await user.getIdToken(true) }) });
+    const response = await fetch("/api/auth/session", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ idToken: await user.getIdToken(true), growth: readClientGrowthContext() }) });
     if (!response.ok) { console.error("[auth] session endpoint rejected sign-in", { status: response.status }); throw new Error("SESSION_FAILED"); }
     const session = await response.json() as { admin?: boolean };
     if (mode === "register") {
@@ -96,7 +96,7 @@ export function AuthForm({ mode, initialNotice, returnTo }: { mode: "login" | "r
         const idToken = await credential.user.getIdToken(true);
         try { const branded = await fetch("/api/auth/email", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ type: "verification", email, idToken }) }); if (!branded.ok) await sendEmailVerification(credential.user, actionSettings); }
         catch { await sendEmailVerification(credential.user, actionSettings).catch(() => undefined); }
-        const response = await fetch("/api/auth/session", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ idToken }) });
+        const response = await fetch("/api/auth/session", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ idToken, growth: readClientGrowthContext() }) });
         if (!response.ok) throw new Error("SESSION_FAILED");
         trackAnalyticsEvent("register_complete", { method: "email" });
         trackAnalyticsEvent("sign_up", { method: "email" });

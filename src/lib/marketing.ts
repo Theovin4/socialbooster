@@ -22,7 +22,9 @@ export const marketingSegments = [
   { id: "at_risk", label: "At risk", description: "Eligible customers whose last completed order was 31–60 days ago." },
   { id: "inactive", label: "Inactive", description: "Eligible customers whose last completed order was 61–90 days ago." },
   { id: "dormant", label: "Dormant", description: "Eligible customers whose last completed order was more than 90 days ago." },
+  { id: "registered_no_order", label: "Registered, no completed order", description: "Eligible registered customers who have not completed an order." },
   { id: "funded_no_order", label: "Funded, no completed order", description: "Eligible customers with a funded wallet and no completed order." },
+  { id: "first_order", label: "First-order customers", description: "Eligible customers with exactly one completed order." },
   { id: "repeat", label: "Repeat customers", description: "Eligible customers with at least two completed orders." },
   { id: "vip", label: "VIP", description: "Eligible customers whose completed order value meets the configured VIP threshold." },
   { id: "reseller_api", label: "Reseller or API", description: "Eligible customers who use an API key or have reseller status." },
@@ -75,7 +77,9 @@ export function marketingSegmentMemberships(profile: Record<string, unknown>, no
   if (daysSinceOrder !== null && daysSinceOrder >= 31 && daysSinceOrder <= 60) memberships.add("at_risk");
   if (daysSinceOrder !== null && daysSinceOrder >= 61 && daysSinceOrder <= 90) memberships.add("inactive");
   if (daysSinceOrder !== null && daysSinceOrder > 90) memberships.add("dormant");
+  if (completed === 0) memberships.add("registered_no_order");
   if (profile.walletFunded === true && completed === 0) memberships.add("funded_no_order");
+  if (completed === 1) memberships.add("first_order");
   if (completed >= 2) memberships.add("repeat");
   if (Number(profile.lifetimeOrderValueMinor || 0) >= VIP_LIFETIME_VALUE_MINOR) memberships.add("vip");
   if (profile.resellerOrApi === true) memberships.add("reseller_api");
