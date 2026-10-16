@@ -16,9 +16,10 @@ The interrupted work was recovered from the existing checkout. Nothing was rebui
 | Released handoff commit | `984df3b782228d5662ef7c569381cdfd1b659359` — `Document finance repair release gates` |
 | Catalogue-cache completion commit | `73463b6591234ebb74808cec2d6bfedc9388737d` — `Initialize missing catalogue analytics cache` |
 | Growth-pass baseline | `9026abfe466a6f3b4bd6450a99daebe2bfbf810c` — `Finalize finance repair handoff` |
+| Growth enablement checkpoint | `674b585` — `Implement Social Booster growth enablement` |
 | Firebase project | `socialbooster-cbcc6` |
 | Production site | `https://www.socialbooster.net.ng` |
-| Working tree | Growth enablement candidate complete and locally verified; not deployed and no production data changed |
+| Working tree | Combined Growth Enablement + Provider Confirmation Recovery candidate complete and locally verified; no production data changed during validation |
 
 No real payment, order, refill, cancellation, provider submission, crypto approval, wallet mutation, customer-data mutation, or manual provider synchronization was used during this repair.
 
@@ -39,6 +40,9 @@ No real payment, order, refill, cancellation, provider submission, crypto approv
 - Public services are produced from versioned, compact provider snapshots and mapped to provider-neutral public IDs.
 - Catalogue quality rules sanitize names, reject non-service/placeholder rows, deduplicate public entries and enforce order eligibility again inside the order transaction.
 - Provider submissions are not automatically retried when the outcome is uncertain. Such orders enter `provider_confirmation_required` to prevent accidental duplicate upstream orders.
+- `/admin/provider` has a bounded 25-item recovery queue for ambiguous submissions. An administrator must either attach an external order ID that passes a read-only provider-status lookup or attest that the provider dashboard contains no order before the remaining charge is refunded. Recovery never calls the provider `add` operation.
+- Provider/order identity pairs are reserved transactionally in a server-only index. Recovery decisions, finance transitions, wallet refunds and notifications use idempotent keys so interrupted work can resume without a duplicate provider order or wallet credit.
+- Provider routing, external IDs, provider events and the uniqueness index are server/admin-only. Customer pages and API status responses return provider-neutral order fields.
 
 ### Pricing and money
 
@@ -127,6 +131,8 @@ These are architecture-based upper-bound estimates for a normal page load, not F
 | Support inbox | Up to 28 |
 | Crypto administration | Up to 28 |
 | Email marketing overview | Up to 27 on a five-minute cache refresh; near zero database reads on a warm cache |
+| Acquisition report | Up to 126 documents plus four aggregates on a five-minute cache refresh; no pageview documents |
+| Provider administration | Up to 79 Firestore reads plus deliberate live provider calls |
 | Manual reconciliation | Low hundreds at the current catalogue shape: compact totals plus provider snapshot chunks |
 
 The rebuild reads every authoritative order and wallet transaction once, performs one wallet aggregate, and writes canonical order fields plus affected daily/monthly/global rollups. The protected UI did not expose its per-operation counters, and the hosting plan's runtime-log retention had expired before those counters were retrieved, so exact rebuild I/O is unavailable in this handoff. Normal request paths remain comfortably below the requested 5,000-read safety target; sustained daily consumption still depends on real traffic and must be checked in Firebase billing/usage telemetry.
@@ -141,6 +147,7 @@ There is no remaining Finance release blocker.
 2. README and old setup documents have historical drift and should be reconciled separately.
 3. The full dependency audit still reports 25 development-tool advisories (1 moderate, 22 high, 2 critical), including packages without an automatic fix. Production dependencies report zero vulnerabilities.
 4. Exact one-time rebuild I/O counters were not recoverable after the short runtime-log retention window; use Firebase usage telemetry for billing evidence.
+5. Provider confirmation recovery intentionally depends on a human checking the provider dashboard because the configured provider APIs expose no safe search-by-client-reference operation. Never replace this with automatic resubmission.
 
 ## Growth enablement pass — 16 October 2026
 
@@ -172,6 +179,30 @@ Growth work should continue in small phases:
 1. Release the validated candidate without running live payments, orders, provider syncs or referral credits.
 2. After release, perform read-only GA4 DebugView and protected-page smoke checks using a test account; do not create financial transactions.
 3. Review acquisition rollups and referral fraud flags after real, consented traffic exists; adjust reward rules only through the audited administrator form.
+
+## Provider Confirmation Recovery — 16 October 2026
+
+The recovery pass is layered on top of the preserved Growth Enablement checkpoint and does not change provider submission, payment verification, wallet funding, catalogue synchronization or pricing behavior.
+
+- Ambiguous submissions remain quarantined as `provider_confirmation_required`; they are never automatically retried.
+- The administrator recovery queue is independent of the 50-row live-order page, so older ambiguous orders cannot disappear behind pagination.
+- Accepted recovery requires the exact upstream order ID, a review note, explicit confirmation and a successful read-only status lookup. A provider-scoped uniqueness record prevents two local orders from claiming the same upstream order ID.
+- Rejected recovery requires a review note and explicit confirmation that no upstream order exists. It calculates the unrefunded remainder across automatic, status, administrator and recovery refund keys, then posts one idempotent wallet credit and records the finance transition.
+- The generic administrator refund action refuses ambiguous orders, preventing a refund while an upstream order may exist.
+- Customer Firestore access to internal order/provider documents is closed. Authenticated server pages and the customer API continue to return only customer-safe order details.
+- The provider administration route remains bounded at 50 paginated orders, 25 recovery items, one count and three provider-state documents, plus deliberate live provider status/balance calls.
+
+Combined candidate validation:
+
+| Gate | Result |
+| --- | --- |
+| Full test suite | Passed: 30 files / 155 tests |
+| TypeScript | Passed: `tsc --noEmit` |
+| ESLint | Passed with zero warnings |
+| Production build | Passed: compilation, TypeScript, page-data collection and all 88 static pages; `/admin/acquisition` and `/admin/provider` present |
+| Finance / pricing | Finance regression suite passed; 40% gross-margin tests passed |
+| Growth preservation | Acquisition, referral, lifecycle, Firebase-optimization and Firestore-rule regressions passed |
+| Live financial/provider testing | Not performed by design |
 
 ## Next steps in small phases
 

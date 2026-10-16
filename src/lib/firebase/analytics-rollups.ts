@@ -11,6 +11,7 @@ import {
 } from "../finance-rollup-model";
 import { adminDb } from "./admin";
 import { lagosDateKey } from "./stats";
+import { providerOrderIndexId } from "../provider-confirmation-recovery";
 
 export const ANALYTICS_GLOBAL = "global";
 export const ANALYTICS_DAILY = "analyticsDaily";
@@ -180,7 +181,11 @@ export async function recordFinanceOrderStatus(input: StatusRollupInput) {
 }
 
 /** Persists provider acceptance and deployed capital in one idempotent transaction. */
-export async function recordFinanceProviderAccepted(input: { orderId: string; providerOrderId: number }) {
+export async function recordFinanceProviderAccepted(input: {
+  orderId: string;
+  providerOrderId: number;
+  confirmationRecovery?: { resolvedBy: string; note: string; providerStatus: string };
+}) {
   if (!Number.isSafeInteger(input.providerOrderId) || input.providerOrderId <= 0) throw new Error("Invalid provider order ID");
   const db = adminDb();
   const orderRef = db.collection("orders").doc(input.orderId);
@@ -188,8 +193,13 @@ export async function recordFinanceProviderAccepted(input: { orderId: string; pr
   return db.runTransaction(async (transaction) => {
     const [existing, order] = await Promise.all([transaction.get(eventRef), transaction.get(orderRef)]);
     if (!order.exists) throw new Error("Order not found");
+    const providerKey = String(order.get("providerKey") || "");
+    const indexRef = db.collection("providerOrderIndex").doc(providerOrderIndexId(providerKey, input.providerOrderId));
+    const index = await transaction.get(indexRef);
+    if (index.exists && index.get("orderId") !== input.orderId) throw new Error("Provider order ID is already assigned");
     if (existing.exists) {
       if (Number(order.get("providerOrderId")) !== input.providerOrderId) throw new Error("Provider order ID conflict");
+      if (!index.exists) transaction.create(indexRef, { providerKey, providerOrderId: input.providerOrderId, orderId: input.orderId, createdAt: FieldValue.serverTimestamp() });
       return { duplicate: true, status: String(order.get("status") || "pending") };
     }
     const previous = String(order.get("status") || "submitting");
@@ -229,6 +239,12 @@ export async function recordFinanceProviderAccepted(input: { orderId: string; pr
       financeDateKey: dateKey,
       createdAt: FieldValue.serverTimestamp(),
     });
+    transaction.create(indexRef, {
+      providerKey,
+      providerOrderId: input.providerOrderId,
+      orderId: input.orderId,
+      createdAt: FieldValue.serverTimestamp(),
+    });
     transaction.set(orderRef, {
       providerOrderId: input.providerOrderId,
       providerAccepted: true,
@@ -236,6 +252,13 @@ export async function recordFinanceProviderAccepted(input: { orderId: string; pr
       status: next,
       submittedAt: FieldValue.serverTimestamp(),
       updatedAt: FieldValue.serverTimestamp(),
+      ...(input.confirmationRecovery ? {
+        providerConfirmationResolution: "accepted",
+        providerConfirmationResolvedBy: input.confirmationRecovery.resolvedBy,
+        providerConfirmationReviewNote: input.confirmationRecovery.note,
+        providerConfirmationVerifiedStatus: input.confirmationRecovery.providerStatus,
+        providerConfirmationResolvedAt: FieldValue.serverTimestamp(),
+      } : {}),
     }, { merge: true });
     financeWrites(transaction, dateKey, topLevel, { byStatus });
     return { duplicate: false, status: next };

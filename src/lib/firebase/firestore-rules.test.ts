@@ -15,4 +15,12 @@ describe("Firestore rules regression guard", () => {
     const line = rules.split(/\r?\n/).find((entry) => entry.includes("match /services/"));
     expect(line).toContain("allow read: if admin()");
   });
+
+  it("keeps provider order identities server-only", () => {
+    for (const collection of ["orders", "orderEvents", "refills", "providerOrderIndex"]) {
+      const line = rules.split(/\r?\n/).find((entry) => entry.includes(`match /${collection}/`));
+      expect(line, `${collection} rule`).not.toContain("resource.data.userId == request.auth.uid");
+      expect(line, `${collection} rule`).toMatch(/allow read(?:, write)?: if (?:admin\(\)|false)/);
+    }
+  });
 });
