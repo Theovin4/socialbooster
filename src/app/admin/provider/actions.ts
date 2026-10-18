@@ -12,6 +12,9 @@ import { remainingRefundAmount } from "@/lib/order-refund-policy";
 import { recordFinanceOrderStatus, recordFinanceProviderAccepted } from "@/lib/firebase/analytics-rollups";
 import { lagosDateKey } from "@/lib/firebase/stats";
 import { createCustomerNotificationOnce } from "@/lib/customer-notifications";
+import { classifySubmissionError, safeSubmissionDiagnostics } from "@/lib/order-submission-outcome";
+import { providerAcceptsNewOrders, recordAmbiguousProviderSubmission } from "@/lib/provider-order-health";
+import { sendAdminAlert } from "@/lib/email";
 import {
   providerConfirmationClaimMatches,
   providerConfirmationRecoveryState,
@@ -30,6 +33,8 @@ const rejectionSchema = z.object({
   note: z.string().trim().min(10).max(500),
   confirmed: z.literal("yes"),
 });
+const retrySchema = rejectionSchema;
+const healthSchema = z.object({ providerKey: z.enum(["followspanel", "nitro", "smmworld"]), confirmed: z.literal("yes") });
 
 async function claimProviderConfirmation(
   orderId: string,
@@ -42,12 +47,16 @@ async function claimProviderConfirmation(
   return db.runTransaction(async (transaction) => {
     const snapshot = await transaction.get(ref);
     if (!snapshot.exists) throw new Error("Order not found");
-    const order = snapshot.data()!;
+    const order = snapshot.data()! as Record<string, unknown>;
     const recovery = providerConfirmationRecoveryState(order);
     if (!recovery.eligible) throw new Error(recovery.reason);
     if (order.providerConfirmationDecision) {
-      if (!providerConfirmationClaimMatches(order, decision, providerOrderId)) throw new Error("A different provider-confirmation decision is already in progress");
-      return order;
+      const claimedAt = (order.providerConfirmationClaimedAt as { toMillis?: () => number } | undefined)?.toMillis?.() || Date.now();
+      const staleRetryClaim = order.providerConfirmationDecision === "retry" && decision !== "retry" && Date.now() - claimedAt >= 10 * 60 * 1000;
+      if (!staleRetryClaim) {
+        if (!providerConfirmationClaimMatches(order, decision, providerOrderId)) throw new Error("A different provider-confirmation decision is already in progress");
+        return order;
+      }
     }
     transaction.set(ref, {
       providerConfirmationDecision: decision,
@@ -59,6 +68,67 @@ async function claimProviderConfirmation(
     }, { merge: true });
     return { ...order, providerConfirmationDecision: decision, providerConfirmationExternalId: providerOrderId };
   });
+}
+
+async function claimSingleRetry(orderId: string, actorUid: string, note: string): Promise<Record<string, unknown>> {
+  const db = adminDb(), ref = db.collection("orders").doc(orderId);
+  return db.runTransaction(async (transaction) => {
+    const snapshot = await transaction.get(ref);
+    if (!snapshot.exists) throw new Error("Order not found");
+    const order = snapshot.data()! as Record<string, unknown>;
+    const recovery = providerConfirmationRecoveryState(order);
+    if (!recovery.eligible) throw new Error(recovery.reason);
+    if (order.providerConfirmationRetryUsed) throw new Error("The one permitted provider retry has already been used");
+    if (order.providerConfirmationDecision) throw new Error("Another provider-confirmation decision is already in progress");
+    const attempt = Math.max(1, Number(order.submissionAttemptCount || 1)) + 1;
+    transaction.set(ref, {
+      providerConfirmationDecision: "retry",
+      providerConfirmationRetryUsed: true,
+      providerConfirmationReviewNote: note,
+      providerConfirmationClaimedBy: actorUid,
+      providerConfirmationClaimedAt: FieldValue.serverTimestamp(),
+      submissionAttemptCount: attempt,
+      submissionLastAttemptAt: FieldValue.serverTimestamp(),
+      updatedAt: FieldValue.serverTimestamp(),
+    }, { merge: true });
+    return { ...order, providerConfirmationDecision: "retry", providerConfirmationRetryUsed: true, submissionAttemptCount: attempt } as Record<string, unknown>;
+  });
+}
+
+async function refundAndCloseProviderConfirmation(input: { orderId: string; order: Record<string, unknown>; actorUid: string; note: string; source: string }) {
+  const db = adminDb(), charge = Number(input.order.customerPriceMinor);
+  if (!Number.isSafeInteger(charge) || charge <= 0) throw new Error("Order charge is invalid");
+  const refundKeys = providerConfirmationRefundKeys(input.orderId);
+  const refundDocuments = await db.getAll(...refundKeys.map((key) => db.collection("walletTransactions").doc(key)));
+  const alreadyRefunded = refundDocuments.filter((item) => item.exists).reduce((sum, item) => sum + Math.max(0, Number(item.get("deltaMinor") || 0)), 0);
+  const amount = remainingRefundAmount(charge, [alreadyRefunded]);
+  if (amount > 0) await postWallet({ userId: String(input.order.userId), type: "refund", deltaMinor: amount, currency: String(input.order.currency || "NGN"), idempotencyKey: `provider-confirmation-refund:${input.orderId}`, reference: input.orderId, reason: "Provider confirmation recovery closed without an accepted order", actorUid: input.actorUid });
+  await recordFinanceOrderStatus({
+    orderId: input.orderId,
+    previous: "provider_confirmation_required",
+    next: "failed",
+    customerPriceMinor: charge,
+    providerCostIncurredMinor: 0,
+    dateKey: String(input.order.financeDateKey || lagosDateKey((input.order.createdAt as { toDate?: () => Date } | undefined)?.toDate?.() || new Date())),
+    orderUpdate: {
+      status: "failed",
+      submissionOutcome: "CONFIRMED_REJECTED",
+      providerConfirmationResolution: "rejected",
+      providerConfirmationResolvedBy: input.actorUid,
+      providerConfirmationReviewNote: input.note,
+      providerConfirmationResolvedAt: FieldValue.serverTimestamp(),
+      refundedAmountMinor: Math.min(charge, alreadyRefunded + amount),
+      refundedAt: FieldValue.serverTimestamp(),
+      refundSource: amount > 0 ? input.source : "existing_verified_refund",
+      updatedAt: FieldValue.serverTimestamp(),
+    },
+  });
+  await Promise.all([
+    db.collection("auditLogs").doc(`provider-confirmation:${input.orderId}`).set({ action: "provider_confirmation_refund_and_close", targetType: "order", targetId: input.orderId, amountMinor: amount, reviewNote: input.note, source: input.source, actorUid: input.actorUid, createdAt: FieldValue.serverTimestamp() }, { merge: true }),
+    db.collection("orderEvents").doc(`provider-confirmation:${input.orderId}`).set({ orderId: input.orderId, userId: input.order.userId, status: "failed", previousStatus: "provider_confirmation_required", createdAt: FieldValue.serverTimestamp(), actorUid: input.actorUid }, { merge: true }),
+    createCustomerNotificationOnce({ userId: String(input.order.userId), type: "order_status", title: "Order charge returned", orderId: input.orderId }, `provider-rejected:${input.orderId}`),
+  ]);
+  return amount;
 }
 
 export async function refreshLiveOrders() {
@@ -137,44 +207,78 @@ export async function confirmProviderAccepted(formData: FormData) {
 export async function confirmProviderRejected(formData: FormData) {
   const admin = await requireAdmin();
   const input = rejectionSchema.parse(Object.fromEntries(formData));
-  const db = adminDb();
+  const existing = await adminDb().collection("orders").doc(input.orderId).get();
+  if (existing.exists && existing.get("providerConfirmationResolution") === "rejected" && Number(existing.get("refundedAmountMinor") || 0) >= Number(existing.get("customerPriceMinor") || 0)) redirect("/admin/provider?notice=provider-rejected");
   const claimed = await claimProviderConfirmation(input.orderId, "rejected", admin.uid, input.note);
-  const charge = Number(claimed.customerPriceMinor);
-  if (!Number.isSafeInteger(charge) || charge <= 0) throw new Error("Order charge is invalid");
-  const refundKeys = providerConfirmationRefundKeys(input.orderId);
-  const refundDocuments = await db.getAll(...refundKeys.map((key) => db.collection("walletTransactions").doc(key)));
-  const alreadyRefunded = refundDocuments.filter((item) => item.exists).reduce((sum, item) => sum + Math.max(0, Number(item.get("deltaMinor") || 0)), 0);
-  const amount = remainingRefundAmount(charge, [alreadyRefunded]);
-  if (amount > 0) await postWallet({ userId: String(claimed.userId), type: "refund", deltaMinor: amount, currency: String(claimed.currency || "NGN"), idempotencyKey: `provider-confirmation-refund:${input.orderId}`, reference: input.orderId, reason: "Provider dashboard confirmed order was not accepted", actorUid: admin.uid });
-  await recordFinanceOrderStatus({
-    orderId: input.orderId,
-    previous: "provider_confirmation_required",
-    next: "failed",
-    customerPriceMinor: charge,
-    providerCostIncurredMinor: 0,
-    dateKey: String(claimed.financeDateKey || lagosDateKey(claimed.createdAt?.toDate?.() || new Date())),
-    orderUpdate: {
-      status: "failed",
-      providerConfirmationResolution: "rejected",
-      providerConfirmationResolvedBy: admin.uid,
-      providerConfirmationReviewNote: input.note,
-      providerConfirmationResolvedAt: FieldValue.serverTimestamp(),
-      refundedAmountMinor: Math.min(charge, alreadyRefunded + amount),
-      refundedAt: FieldValue.serverTimestamp(),
-      refundSource: amount > 0 ? "provider_confirmation_recovery" : "existing_verified_refund",
-      updatedAt: FieldValue.serverTimestamp(),
-    },
-  });
-  await Promise.all([
-    db.collection("auditLogs").doc(`provider-confirmation:${input.orderId}`).set({ action: "provider_confirmation_rejected", targetType: "order", targetId: input.orderId, amountMinor: amount, reviewNote: input.note, actorUid: admin.uid, createdAt: FieldValue.serverTimestamp() }, { merge: true }),
-    db.collection("orderEvents").doc(`provider-confirmation:${input.orderId}`).set({ orderId: input.orderId, userId: claimed.userId, status: "failed", previousStatus: "provider_confirmation_required", createdAt: FieldValue.serverTimestamp(), actorUid: admin.uid }, { merge: true }),
-    createCustomerNotificationOnce({ userId: String(claimed.userId), type: "order_status", title: "Order charge returned", orderId: input.orderId }, `provider-rejected:${input.orderId}`),
-  ]);
+  await refundAndCloseProviderConfirmation({ orderId: input.orderId, order: claimed, actorUid: admin.uid, note: input.note, source: "provider_confirmation_recovery" });
   revalidatePath("/admin/provider");
   revalidatePath(`/dashboard/orders/${input.orderId}`);
   revalidatePath("/dashboard/wallet");
   revalidatePath("/dashboard/transactions");
   redirect("/admin/provider?notice=provider-rejected");
+}
+
+export async function retryProviderSubmissionOnce(formData: FormData) {
+  const admin = await requireAdmin();
+  const input = retrySchema.parse(Object.fromEntries(formData));
+  const db = adminDb(), ref = db.collection("orders").doc(input.orderId);
+  const beforeClaim = await ref.get();
+  if (!beforeClaim.exists) throw new Error("Order not found");
+  const provider = getProvider(beforeClaim.get("providerKey"));
+  if (!provider.configured) throw new Error("Provider is not configured for a confirmed retry");
+  const health = await db.collection("providerOrderHealth").doc(provider.key).get();
+  if (!providerAcceptsNewOrders(health.exists ? health.data() : undefined)) throw new Error("Provider is degraded; complete a successful health verification before retrying");
+  const order = await claimSingleRetry(input.orderId, admin.uid, input.note);
+  let providerOrderId: number;
+  try {
+    // Exactly one administrator-authorized add call. Provider clients retain safeRetry=false.
+    const result = await provider.client.add(order.providerServiceId as string | number, String(order.link), Number(order.quantity));
+    providerOrderId = result.order;
+  } catch (error) {
+    const outcome = classifySubmissionError(error), diagnostics = safeSubmissionDiagnostics(error);
+    if (outcome === "CONFIRMED_REJECTED") {
+      await refundAndCloseProviderConfirmation({ orderId: input.orderId, order, actorUid: admin.uid, note: input.note, source: "provider_retry_explicit_rejection" });
+      revalidatePath("/admin/provider");
+      redirect("/admin/provider?notice=provider-rejected");
+    }
+    await ref.set({
+      status: "provider_confirmation_required",
+      submissionOutcome: "AMBIGUOUS",
+      ...diagnostics,
+      providerConfirmationDecision: FieldValue.delete(),
+      providerConfirmationClaimedBy: FieldValue.delete(),
+      providerConfirmationClaimedAt: FieldValue.delete(),
+      updatedAt: FieldValue.serverTimestamp(),
+    }, { merge: true });
+    await recordAmbiguousProviderSubmission({ providerKey: provider.key, orderId: input.orderId, attempt: Number(order.submissionAttemptCount) }).catch((healthError) => console.warn("[provider-health] ambiguity recording failed", { orderId: input.orderId, error: healthError instanceof Error ? healthError.message : "Unknown error" }));
+    await sendAdminAlert({ subject: `Retry still requires review #${input.orderId.slice(0, 8)}`, title: "Provider confirmation remains unresolved", message: "The single administrator-authorized retry did not return a certain result. No further automatic or manual retry is permitted; attach a verified provider order or refund and close.", buttonLabel: "Open recovery queue", buttonUrl: `${process.env.NEXT_PUBLIC_APP_URL || "https://www.socialbooster.net.ng"}/admin/provider`, idempotencyKey: `provider-retry-ambiguous-${input.orderId}` }).catch(() => undefined);
+    revalidatePath("/admin/provider");
+    redirect("/admin/provider?notice=provider-review");
+  }
+  await recordFinanceProviderAccepted({ orderId: input.orderId, providerOrderId, confirmationRecovery: { resolvedBy: admin.uid, note: input.note, providerStatus: "manual_retry_accepted" } });
+  await Promise.all([
+    db.collection("auditLogs").doc(`provider-confirmation-retry:${input.orderId}`).set({ action: "provider_confirmation_manual_retry_accepted", targetType: "order", targetId: input.orderId, providerKey: provider.key, providerOrderId, actorUid: admin.uid, createdAt: FieldValue.serverTimestamp() }, { merge: true }),
+    db.collection("orderEvents").doc(`provider-confirmation-retry:${input.orderId}`).set({ orderId: input.orderId, userId: order.userId, status: "pending", previousStatus: "provider_confirmation_required", createdAt: FieldValue.serverTimestamp(), actorUid: admin.uid }, { merge: true }),
+    createCustomerNotificationOnce({ userId: String(order.userId), type: "order_status", title: "Order confirmation completed", orderId: input.orderId }, `provider-retry-confirmed:${input.orderId}`),
+  ]);
+  revalidatePath("/admin/provider");
+  redirect("/admin/provider?notice=provider-confirmed");
+}
+
+export async function verifyProviderOrderHealth(formData: FormData) {
+  const admin = await requireAdmin();
+  const input = healthSchema.parse(Object.fromEntries(formData));
+  const provider = getProvider(input.providerKey);
+  if (!provider.configured) throw new Error("Provider is not configured");
+  await provider.client.balance();
+  const db = adminDb();
+  await Promise.all([
+    db.collection("providerOrderHealth").doc(provider.key).set({ status: "ACTIVE", ambiguousCount: 0, windowStartedAt: FieldValue.serverTimestamp(), verifiedAt: FieldValue.serverTimestamp(), verifiedBy: admin.uid, updatedAt: FieldValue.serverTimestamp() }, { merge: true }),
+    db.collection("operationsAlerts").doc(`provider_orders_${provider.key}`).set({ active: false, resolvedAt: FieldValue.serverTimestamp(), resolvedBy: admin.uid, updatedAt: FieldValue.serverTimestamp() }, { merge: true }),
+    db.collection("auditLogs").add({ action: "provider_order_health_verified", targetType: "provider", targetId: provider.key, actorUid: admin.uid, createdAt: FieldValue.serverTimestamp() }),
+  ]);
+  revalidatePath("/admin/provider");
+  redirect("/admin/provider?notice=provider-health-verified");
 }
 
 export async function retryCancellation(formData: FormData) {

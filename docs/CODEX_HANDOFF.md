@@ -233,3 +233,32 @@ Combined candidate validation:
 - Preserve integer-minor-unit accounting and the 40% gross-margin rule.
 - Treat rollups as caches; authoritative order, ledger and wallet records take precedence.
 - If reconciliation does not MATCH, stop and report exact drift; never hide it with manual edits.
+
+## Provider confirmation recovery hardening — 18 October 2026
+
+Baseline before this pass was clean `main` at `43a4a32` (`Add provider confirmation recovery`), already containing Growth Enablement commit `674b585`. This targeted hardening preserves the 40% gross-margin pricing formula, wallet/payment behavior, catalogue sync architecture and all existing growth features.
+
+- Provider order submissions now record explicit `CONFIRMED_ACCEPTED`, `CONFIRMED_REJECTED` or `AMBIGUOUS` outcomes plus bounded safe attempt diagnostics. Network, timeout, response-parse and retryable HTTP failures remain ambiguous and are never automatically resubmitted.
+- `/admin/provider` now has an oldest-first, bounded 50-item confirmation queue with an exact aggregate count, provider/age-bucket audit, internal-only diagnostics, read-only verified order attachment, idempotent refund-and-close and a single explicitly confirmed retry. The retry claim is consumed before the one `add` call, never debits the wallet, and cannot loop. A stale interrupted retry claim becomes manually recoverable after ten minutes without permitting another retry.
+- The scheduled order job performs one indexed, oldest-first query capped at 50 review orders. It only records one reminder and one escalation stage and sends a bounded idempotent summary; it never calls provider order creation. Including existing live-order/refill limits, the route reads at most 250 queried order/refill documents per run before the existing bounded crypto reconciliation, plus only the review documents that advance an alert stage.
+- Three ambiguous submissions for one provider within 15 minutes mark that provider `DEGRADED`, create an operations alert and block new provider-backed orders inside the same pre-debit order transaction. Recovery requires an administrator-triggered successful read-only balance verification. Catalogue history is not altered.
+- Customer status remains `Under review` with the exact duplicate-order warning. Customer email and UI contain no provider name, provider ID, error or cost. Admin-only diagnostics retain provider identity. Service names are normalized from HTML entities before the email template escapes them exactly once.
+- Unconfirmed orders keep provider capital at zero. Provider acceptance still goes through the existing idempotent, provider-scoped finance transaction. Refund-and-close computes the remaining refundable amount across every existing refund key and credits at most the original customer charge once.
+- New server-only Firestore collections are `providerOrderHealth` and `providerSubmissionEvents`. No pageview logging or unbounded historical scan was introduced.
+
+Hardening validation before release:
+
+| Gate | Result |
+| --- | --- |
+| Full test suite | Passed: 33 files / 165 tests |
+| TypeScript | Passed: `tsc --noEmit` |
+| ESLint | Passed with zero warnings |
+| Production build | Passed: compilation, TypeScript, page-data collection and all 88 static pages |
+| Firestore rules | Regression tests passed; Firebase dry-run compiled successfully for `socialbooster-cbcc6` |
+| Finance / pricing / growth | Finance, 40% margin, acquisition, referral, lifecycle and Firebase-optimization regressions passed |
+| Production dependency audit | Passed: zero vulnerabilities with `npm audit --omit=dev` |
+| Full dependency audit | 10 development-tool advisories remain (1 moderate, 7 high, 2 critical); available complete fixes require breaking Vitest/ESLint changes and were not applied automatically |
+| Tracked-file secret scan | No private-key or common live-token pattern found |
+| Live financial/provider testing | Not performed by design |
+
+Next work should remain phased: (1) monitor the deployed queue and alert stages read-only, (2) add emulator-backed concurrency tests for retry/refund claims, then (3) upgrade development tooling in a separate branch with full regression coverage. Never use the recovery controls without first checking the upstream provider dashboard.

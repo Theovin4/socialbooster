@@ -1,6 +1,6 @@
 export const PROVIDER_CONFIRMATION_REQUIRED = "provider_confirmation_required";
 
-export type ProviderConfirmationDecision = "accepted" | "rejected";
+export type ProviderConfirmationDecision = "accepted" | "rejected" | "retry";
 
 export type ProviderConfirmationOrder = {
   status?: unknown;
@@ -26,7 +26,7 @@ export function providerConfirmationClaimMatches(
   providerOrderId?: number,
 ) {
   if (order.providerConfirmationDecision !== decision) return false;
-  if (decision === "rejected") return true;
+  if (decision === "rejected" || decision === "retry") return true;
   return Number(order.providerConfirmationExternalId) === providerOrderId;
 }
 

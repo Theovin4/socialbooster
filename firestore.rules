@@ -17,6 +17,8 @@ service cloud.firestore {
     match /orders/{id} { allow read: if admin(); allow write: if false; }
     match /orderEvents/{id} { allow read: if admin(); allow write: if false; }
     match /providerOrderIndex/{id} { allow read, write: if false; }
+    match /providerOrderHealth/{id} { allow read, write: if false; }
+    match /providerSubmissionEvents/{id} { allow read, write: if false; }
     match /refills/{id} { allow read: if admin(); allow write: if false; }
     match /transactions/{id} { allow read: if signedIn() && (resource.data.userId == request.auth.uid || admin()); allow write: if false; }
     match /supportTickets/{id} { allow read: if signedIn() && (resource.data.userId == request.auth.uid || admin()); allow write: if false; }

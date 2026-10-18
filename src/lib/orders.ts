@@ -6,10 +6,14 @@ import { DEFAULT_GROSS_MARGIN_BPS, grossMarginBps, markupBps, serviceCostMinor }
 import { serviceSellingRateNgnMinor } from "./currency";
 import { ProviderError } from "./providers/followspanel";
 import { getProvider, normalizeProviderKey } from "./providers";
-import { sendAdminAlert, sendUserEmail } from "./email";
+import { normalizeEmailText, sendAdminAlert, sendUserEmail } from "./email";
 import { lagosDateKey, recordNewOrder } from "./firebase/stats";
 import { recordFinanceOrderCreated, recordFinanceOrderStatus, recordFinanceProviderAccepted, recordWalletRollup } from "./firebase/analytics-rollups";
 import { assertServiceOrderEligible, ServiceUnavailableError } from "./service-quality";
+import { classifySubmissionError, safeSubmissionDiagnostics } from "./order-submission-outcome";
+import { providerAcceptsNewOrders, recordAmbiguousProviderSubmission } from "./provider-order-health";
+
+export const PROVIDER_REVIEW_CUSTOMER_MESSAGE = "We're verifying your order before processing continues. You don't need to place another order. We'll confirm delivery or resolve the charge after verification.";
 
 export type NewOrder = { userId: string; serviceId: string; link: string; quantity: number; idempotencyKey: string };
 export async function createAndSubmitOrder(input: NewOrder) {
@@ -23,6 +27,9 @@ export async function createAndSubmitOrder(input: NewOrder) {
     if (!service.exists) throw new ServiceUnavailableError();
     const data = service.data()!;
     assertServiceOrderEligible(data);
+    const providerKey = normalizeProviderKey(data.providerKey);
+    const providerHealth = await transaction.get(db.collection("providerOrderHealth").doc(providerKey));
+    if (!providerAcceptsNewOrders(providerHealth.exists ? providerHealth.data() : undefined)) throw new ServiceUnavailableError();
     if (input.quantity < data.minQuantity || input.quantity > data.maxQuantity) throw new Error("Quantity is outside service limits");
     const providerCostMinor = Number(serviceCostMinor(BigInt(data.providerRateMinor), BigInt(input.quantity)));
     const convertedProviderCostMinor = providerCostMinor;
@@ -36,8 +43,7 @@ export async function createAndSubmitOrder(input: NewOrder) {
     transaction.create(db.collection("walletTransactions").doc(walletTransactionId), { userId: input.userId, type: "order_debit", deltaMinor: -customerPriceMinor, currency, idempotencyKey: walletTransactionId, reference: orderRef.id, balanceBeforeMinor: available, balanceAfterMinor: next, status: "posted", createdAt: FieldValue.serverTimestamp() });
     transaction.create(db.collection("walletLedger").doc(walletTransactionId), { walletUserId: input.userId, transactionId: walletTransactionId, type: "order_debit", deltaMinor: -customerPriceMinor, currency, balanceBeforeMinor: available, balanceAfterMinor: next, reference: orderRef.id, createdAt: FieldValue.serverTimestamp() });
     const grossProfitMinor = customerPriceMinor - convertedProviderCostMinor;
-    const providerKey = normalizeProviderKey(data.providerKey);
-    const order = { userId: input.userId, serviceId: input.serviceId, serviceName: data.publicName || data.name, serviceCategory: data.categoryName || "Social media service", providerKey, providerLabel: data.providerLabel || getProvider(providerKey).label, providerServiceId: data.providerServiceId, link: input.link, quantity: input.quantity, currency, sellingRateMinor: Number(sellingRateMinor), providerCurrency: data.providerCurrency || "NGN", providerRateMinor: data.providerRateMinor, providerCostMinor, convertedProviderCostMinor, customerPriceMinor, grossProfitMinor, grossMarginTargetBps: Number(DEFAULT_GROSS_MARGIN_BPS), markupBps: Number(markupBps(BigInt(convertedProviderCostMinor), BigInt(customerPriceMinor))), grossMarginBps: Number(grossMarginBps(BigInt(convertedProviderCostMinor), BigInt(customerPriceMinor))), pricingModel: "ngn_gross_margin_v2", refillSupported: data.refillSupported, cancelSupported: data.cancelSupported, status: "submitting", financeDateKey, providerAccepted: false, providerCostIncurredMinor: 0, idempotencyKey: input.idempotencyKey, createdAt: FieldValue.serverTimestamp(), updatedAt: FieldValue.serverTimestamp() };
+    const order = { userId: input.userId, serviceId: input.serviceId, serviceName: normalizeEmailText(data.publicName || data.name), serviceCategory: data.categoryName || "Social media service", providerKey, providerLabel: data.providerLabel || getProvider(providerKey).label, providerServiceId: data.providerServiceId, link: input.link, quantity: input.quantity, currency, sellingRateMinor: Number(sellingRateMinor), providerCurrency: data.providerCurrency || "NGN", providerRateMinor: data.providerRateMinor, providerCostMinor, convertedProviderCostMinor, customerPriceMinor, grossProfitMinor, grossMarginTargetBps: Number(DEFAULT_GROSS_MARGIN_BPS), markupBps: Number(markupBps(BigInt(convertedProviderCostMinor), BigInt(customerPriceMinor))), grossMarginBps: Number(grossMarginBps(BigInt(convertedProviderCostMinor), BigInt(customerPriceMinor))), pricingModel: "ngn_gross_margin_v2", refillSupported: data.refillSupported, cancelSupported: data.cancelSupported, status: "submitting", financeDateKey, providerAccepted: false, providerCostIncurredMinor: 0, submissionAttemptCount: 0, idempotencyKey: input.idempotencyKey, createdAt: FieldValue.serverTimestamp(), updatedAt: FieldValue.serverTimestamp() };
     transaction.create(orderRef, order); transaction.create(db.collection("orderEvents").doc(), { orderId: orderRef.id, userId: input.userId, status: "submitting", createdAt: FieldValue.serverTimestamp() });
     recordNewOrder(transaction);
     recordFinanceOrderCreated(transaction, { customerPriceMinor, dateKey: financeDateKey, status: "submitting" });
@@ -45,6 +51,7 @@ export async function createAndSubmitOrder(input: NewOrder) {
     return order;
   });
   if (("providerOrderId" in local && local.providerOrderId) || local.status !== "submitting") return { id: orderRef.id, status: local.status };
+  await orderRef.set({ submissionAttemptCount: 1, submissionFirstAttemptAt: FieldValue.serverTimestamp(), submissionLastAttemptAt: FieldValue.serverTimestamp(), updatedAt: FieldValue.serverTimestamp() }, { merge: true });
   try {
     const provider = getProvider(local.providerKey);
     if (!provider.configured) throw new ProviderError("Selected provider is not configured", "NOT_CONFIGURED");
@@ -56,8 +63,10 @@ export async function createAndSubmitOrder(input: NewOrder) {
     await sendUserEmail(input.userId, { subject: `Order #${orderRef.id.slice(0, 8)} confirmed`, title: "Order confirmed", message: `Your ${String(local.serviceName)} order for ${input.quantity.toLocaleString("en-NG")} has been accepted. You can view its verified status, start count and remaining quantity from your order dashboard.`, buttonLabel: "Track order", buttonUrl: `${process.env.NEXT_PUBLIC_APP_URL || "https://www.socialbooster.net.ng"}/dashboard/orders/${orderRef.id}` }).then(() => orderRef.set({ customerRoutineEmailCount: FieldValue.increment(1), confirmationEmailSentAt: FieldValue.serverTimestamp() }, { merge: true })).catch((error) => console.warn("[order-confirmation-email] delivery failed", { orderId: orderRef.id, error: error instanceof Error ? error.message : "Unknown error" }));
     return { id: orderRef.id, status: "pending" };
   } catch (error) {
-    const definitelyRejected = error instanceof ProviderError && ["NOT_CONFIGURED", "UPSTREAM_REJECTED"].includes(error.code);
+    const outcome = classifySubmissionError(error);
+    const definitelyRejected = outcome === "CONFIRMED_REJECTED";
     const status = definitelyRejected ? "failed" : "provider_confirmation_required";
+    const diagnostics = safeSubmissionDiagnostics(error);
     console.error("[order-submit] provider submission did not complete", {
       orderId: orderRef.id,
       providerKey: local.providerKey,
@@ -73,18 +82,25 @@ export async function createAndSubmitOrder(input: NewOrder) {
       customerPriceMinor: Number(local.customerPriceMinor),
       providerCostIncurredMinor: 0,
       dateKey: String(local.financeDateKey || financeDateKey),
-      orderUpdate: { status, providerErrorCode: error instanceof ProviderError ? error.code : "NETWORK", updatedAt: FieldValue.serverTimestamp() },
+      orderUpdate: {
+        status,
+        submissionOutcome: outcome,
+        ...diagnostics,
+        ...(definitelyRejected ? {} : { providerConfirmationRequiredAt: FieldValue.serverTimestamp() }),
+        updatedAt: FieldValue.serverTimestamp(),
+      },
     });
     if (definitelyRejected) {
       await postWallet({ userId: input.userId, type: "refund", deltaMinor: local.customerPriceMinor, currency: local.currency, idempotencyKey: `refund:${orderRef.id}`, reference: orderRef.id, reason: "Provider rejected order submission" });
       await orderRef.set({ refundedAmountMinor: Number(local.customerPriceMinor), refundedAt: FieldValue.serverTimestamp(), refundSource: "provider_rejected_before_acceptance", updatedAt: FieldValue.serverTimestamp() }, { merge: true });
     }
+    if (!definitelyRejected) await recordAmbiguousProviderSubmission({ providerKey: String(local.providerKey), orderId: orderRef.id, attempt: 1 }).catch((healthError) => console.warn("[provider-health] ambiguity recording failed", { orderId: orderRef.id, error: healthError instanceof Error ? healthError.message : "Unknown error" }));
     const customerMessage = definitelyRejected
       ? `Order #${orderRef.id.slice(0, 8)} could not be accepted. The full charge has been returned to your wallet automatically.`
-      : `Order #${orderRef.id.slice(0, 8)} is being checked before another submission attempt. No duplicate order will be created.`;
+      : PROVIDER_REVIEW_CUSTOMER_MESSAGE;
     await Promise.allSettled([
       sendUserEmail(input.userId, { subject: `Order #${orderRef.id.slice(0, 8)} needs attention`, title: definitelyRejected ? "Order charge returned" : "Order confirmation in progress", message: customerMessage, buttonLabel: "View order", buttonUrl: `${process.env.NEXT_PUBLIC_APP_URL || "https://www.socialbooster.net.ng"}/dashboard/orders/${orderRef.id}` }),
-      sendAdminAlert({ subject: `Order submission review #${orderRef.id.slice(0, 8)}`, title: definitelyRejected ? "Order rejected and refunded" : "Order needs provider confirmation", message: `${String(local.serviceName)} · ${String(local.providerLabel)} · ${customerMessage}`, buttonLabel: "Review live order", buttonUrl: `${process.env.NEXT_PUBLIC_APP_URL || "https://www.socialbooster.net.ng"}/admin/provider` }),
+      sendAdminAlert({ subject: `Order submission review #${orderRef.id.slice(0, 8)}`, title: definitelyRejected ? "Order rejected and refunded" : "Order needs provider confirmation", message: `${normalizeEmailText(local.serviceName)} · ${String(local.providerLabel)} · ${diagnostics.providerErrorCode}`, buttonLabel: "Review live order", buttonUrl: `${process.env.NEXT_PUBLIC_APP_URL || "https://www.socialbooster.net.ng"}/admin/provider`, idempotencyKey: `provider-review-created-${orderRef.id}` }),
     ]);
     return { id: orderRef.id, status };
   }

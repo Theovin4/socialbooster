@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { sendBrandedEmail } from "./email";
+import { brandedEmail, normalizeEmailText, sendBrandedEmail } from "./email";
 
 const originalKey = process.env.RESEND_API_KEY;
 const originalFrom = process.env.EMAIL_FROM;
@@ -11,6 +11,13 @@ afterEach(() => {
 });
 
 describe("sendBrandedEmail", () => {
+  it("normalizes provider text before branded HTML escapes it once", () => {
+    const normalized = normalizeEmailText("Likes &amp; Views &lt;Premium&gt;");
+    expect(normalized).toBe("Likes & Views <Premium>");
+    const html = brandedEmail({ title: "Order", preview: "Order", message: normalized });
+    expect(html).toContain("Likes &amp; Views &lt;Premium&gt;");
+    expect(html).not.toContain("&amp;amp;");
+  });
   it("returns the accepted Resend message id without copying security mail", async () => {
     process.env.RESEND_API_KEY = "re_test";
     process.env.EMAIL_FROM = "Social Booster <support@socialbooster.net.ng>";

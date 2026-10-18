@@ -248,6 +248,7 @@ export async function recordFinanceProviderAccepted(input: {
     transaction.set(orderRef, {
       providerOrderId: input.providerOrderId,
       providerAccepted: true,
+      submissionOutcome: "CONFIRMED_ACCEPTED",
       providerCostIncurredMinor: providerCostMinor,
       status: next,
       submittedAt: FieldValue.serverTimestamp(),

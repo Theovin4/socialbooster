@@ -5,7 +5,8 @@ import { requireAdmin } from "@/lib/firebase/session";
 import { normalizeProviderKey, providerDefinitions } from "@/lib/providers";
 import { formatMoney } from "@/lib/money";
 import { FieldPath, Timestamp } from "firebase-admin/firestore";
-import { confirmProviderAccepted, confirmProviderRejected, refreshLiveOrders, refundOrder, retryCancellation } from "./actions";
+import { confirmProviderAccepted, confirmProviderRejected, refreshLiveOrders, refundOrder, retryCancellation, retryProviderSubmissionOnce, verifyProviderOrderHealth } from "./actions";
+import { providerReviewAgeBucket } from "@/lib/provider-review-policy";
 
 export const dynamic = "force-dynamic";
 const PAGE_SIZE = 50;
@@ -40,10 +41,11 @@ export default async function ProviderHealthPage({ searchParams }: { searchParam
   if (after) ordersQuery = ordersQuery.startAfter(Timestamp.fromMillis(after.createdAt), after.id);
   if (before) ordersQuery = ordersQuery.endBefore(Timestamp.fromMillis(before.createdAt), before.id);
   const pagedOrdersQuery = before ? ordersQuery.limitToLast(PAGE_SIZE + 1) : ordersQuery.limit(PAGE_SIZE + 1);
-  const [orderSnapshot, countSnapshot, recoverySnapshot] = await Promise.all([
+  const [orderSnapshot, countSnapshot, recoverySnapshot, recoveryCountSnapshot] = await Promise.all([
     pagedOrdersQuery.get(),
     db.collection("orders").count().get(),
-    db.collection("orders").where("status", "==", "provider_confirmation_required").limit(25).get(),
+    db.collection("orders").where("status", "==", "provider_confirmation_required").orderBy("createdAt", "asc").limit(50).get(),
+    db.collection("orders").where("status", "==", "provider_confirmation_required").count().get(),
   ]);
   const hasExtra = orderSnapshot.size > PAGE_SIZE;
   const orders = before && hasExtra ? orderSnapshot.docs.slice(1) : orderSnapshot.docs.slice(0, PAGE_SIZE);
@@ -53,12 +55,14 @@ export default async function ProviderHealthPage({ searchParams }: { searchParam
   const nextCursor = orders.at(-1) ? cursorFor(orders.at(-1)!) : null;
   const total = countSnapshot.data().count;
   const recoveryOrders = recoverySnapshot.docs;
+  const auditNowMs = recoverySnapshot.readTime.toMillis();
   const providers = providerDefinitions();
   const health = await Promise.all(providers.map(async (provider) => {
-    if (!provider.configured) return { ...provider, connectedNow: false as const, balance: null, serviceCount: null, publicServiceCount: null, lastSuccessfulSync: null };
-    const [balance, syncState] = await Promise.all([
+    if (!provider.configured) return { ...provider, connectedNow: false as const, balance: null, serviceCount: null, publicServiceCount: null, lastSuccessfulSync: null, orderHealthStatus: "ACTIVE", ambiguousCount: 0 };
+    const [balance, syncState, orderHealth] = await Promise.all([
       provider.client.balance().catch(() => null),
       db.collection("providerSyncState").doc(provider.key).get().catch(() => null),
+      db.collection("providerOrderHealth").doc(provider.key).get().catch(() => null),
     ]);
     const storedCount = Number(syncState?.get("serviceCount"));
     const publicCount = Number(syncState?.get("publicServiceCount"));
@@ -69,6 +73,8 @@ export default async function ProviderHealthPage({ searchParams }: { searchParam
       serviceCount: Number.isSafeInteger(storedCount) && storedCount >= 0 ? storedCount : null,
       publicServiceCount: Number.isSafeInteger(publicCount) && publicCount >= 0 ? publicCount : null,
       lastSuccessfulSync: syncState?.get("completedAt")?.toDate?.() || null,
+      orderHealthStatus: String(orderHealth?.get("status") || "ACTIVE"),
+      ambiguousCount: Number(orderHealth?.get("ambiguousCount") || 0),
     };
   }));
   const statusGroups = new Map<string, number[]>();
@@ -88,17 +94,25 @@ export default async function ProviderHealthPage({ searchParams }: { searchParam
     <div className="section-head"><div><span className="eyebrow">Order infrastructure</span><h1 className="page-heading">Providers and live orders</h1><p className="muted page-lead">Monitor connections and delivery status across every configured provider.</p></div><form action={refreshLiveOrders}><button className="btn primary">Refresh live data</button></form></div>
     {input.notice === "provider-confirmed" ? <div className="notice" role="status" style={{ marginBottom: 18 }}><strong>Provider confirmation recovered.</strong> The verified external order is now tracked by the normal status synchronizer.</div> : null}
     {input.notice === "provider-rejected" ? <div className="notice" role="status" style={{ marginBottom: 18 }}><strong>Provider rejection resolved.</strong> The remaining verified charge was returned without resubmitting the order.</div> : null}
-    <div className="grid3">{health.map((provider) => <article className="glass card stat-card" key={provider.key}><span className="eyebrow">{provider.label}</span><strong className="stat-value" style={{ fontSize: 28 }}>{provider.connectedNow ? "Connected now" : provider.configured ? "Temporarily unreachable" : "Not configured"}</strong><span className="muted">Configuration: {provider.configured ? "configured" : "missing"}</span><span className="muted">{provider.balance ? `Live balance ${provider.balance.currency} ${provider.balance.balance}` : "Live balance unavailable"}</span><span className="muted">{provider.serviceCount === null ? "Synchronized service count unavailable" : `${provider.serviceCount.toLocaleString("en-NG")} synchronized`}{provider.publicServiceCount === null ? " · public eligible count unavailable" : ` · ${provider.publicServiceCount.toLocaleString("en-NG")} public eligible`}</span><span className="muted">Last successful sync: {provider.lastSuccessfulSync?.toLocaleString("en-NG", { timeZone: "Africa/Lagos" }) || "not recorded"}</span></article>)}</div>
+    {input.notice === "provider-review" ? <div className="notice" role="status" style={{ marginBottom: 18 }}><strong>The single retry remains under review.</strong> No further provider submission will be attempted.</div> : null}
+    {input.notice === "provider-health-verified" ? <div className="notice" role="status" style={{ marginBottom: 18 }}><strong>Provider health verified.</strong> New orders may use this provider again.</div> : null}
+    <div className="grid3">{health.map((provider) => <article className="glass card stat-card" key={provider.key}><span className="eyebrow">{provider.label}</span><strong className="stat-value" style={{ fontSize: 28 }}>{provider.orderHealthStatus === "DEGRADED" ? "DEGRADED" : provider.connectedNow ? "Connected now" : provider.configured ? "Temporarily unreachable" : "Not configured"}</strong><span className="muted">Order safety: {provider.orderHealthStatus} · {provider.ambiguousCount} recent ambiguous submission(s)</span><span className="muted">Configuration: {provider.configured ? "configured" : "missing"}</span><span className="muted">{provider.balance ? `Live balance ${provider.balance.currency} ${provider.balance.balance}` : "Live balance unavailable"}</span><span className="muted">{provider.serviceCount === null ? "Synchronized service count unavailable" : `${provider.serviceCount.toLocaleString("en-NG")} synchronized`}{provider.publicServiceCount === null ? " · public eligible count unavailable" : ` · ${provider.publicServiceCount.toLocaleString("en-NG")} public eligible`}</span><span className="muted">Last successful sync: {provider.lastSuccessfulSync?.toLocaleString("en-NG", { timeZone: "Africa/Lagos" }) || "not recorded"}</span>{provider.orderHealthStatus === "DEGRADED" ? <form action={verifyProviderOrderHealth} style={{ display: "grid", gap: 8 }}><input type="hidden" name="providerKey" value={provider.key} /><label><input type="checkbox" name="confirmed" value="yes" required /> Run a read-only balance verification and reactivate only if successful.</label><button className="btn" type="submit">Verify provider health</button></form> : null}</article>)}</div>
     <section className="glass card" style={{ marginTop: 22 }}>
-      <div className="section-head"><div><span className="eyebrow">Duplicate-order protection</span><h2>Provider confirmation recovery</h2></div><span className="status-pill">{recoveryOrders.length} awaiting review</span></div>
-      <p className="muted">Use the provider dashboard to locate the original submission. Recovery performs a read-only status check; it never submits the order again. Reject only after confirming that no upstream order exists.</p>
+      <div className="section-head"><div><span className="eyebrow">Duplicate-order protection</span><h2>Orders requiring provider confirmation</h2></div><span className="status-pill">{recoveryCountSnapshot.data().count} awaiting review</span></div>
+      <p className="muted">Use the provider dashboard to locate the original submission. Attaching an order performs a read-only status check. The separate retry action calls the provider exactly once and is available only after an administrator confirms no upstream order exists.</p>
+      {recoveryOrders.length ? <div className="card" style={{ marginBottom: 16 }}><strong>Read-only queue audit</strong><p className="muted" style={{ marginBottom: 0 }}>{Array.from(new Map(recoveryOrders.map((order) => [normalizeProviderKey(order.get("providerKey")), recoveryOrders.filter((item) => normalizeProviderKey(item.get("providerKey")) === normalizeProviderKey(order.get("providerKey")))]))).map(([key, items]) => `${providers.find((provider) => provider.key === key)?.label || key}: ${items.length} (${Object.entries(items.reduce<Record<string, number>>((counts, item) => { const created = item.get("createdAt")?.toMillis?.() || auditNowMs; const bucket = providerReviewAgeBucket(auditNowMs - created); counts[bucket] = (counts[bucket] || 0) + 1; return counts; }, {})).map(([bucket, count]) => `${bucket} ${count}`).join(", ")})`).join(" · ")}</p></div> : null}
       {recoveryOrders.length === 0 ? <p>No ambiguous submissions need review.</p> : <div style={{ display: "grid", gap: 16 }}>{recoveryOrders.map((order) => {
         const provider = providers.find((item) => item.key === normalizeProviderKey(order.get("providerKey")))!;
-        const claimedDecision = String(order.get("providerConfirmationDecision") || "");
+        const rawClaimedDecision = String(order.get("providerConfirmationDecision") || "");
+        const claimedAtMs = order.get("providerConfirmationClaimedAt")?.toMillis?.() || auditNowMs;
+        const claimedDecision = rawClaimedDecision === "retry" && auditNowMs - claimedAtMs >= 10 * 60 * 1000 ? "" : rawClaimedDecision;
         const claimedExternalId = Number(order.get("providerConfirmationExternalId"));
         const reviewNote = String(order.get("providerConfirmationReviewNote") || "");
+        const createdAt = order.get("createdAt")?.toDate?.();
+        const attemptAt = order.get("submissionLastAttemptAt")?.toDate?.() || order.get("providerConfirmationRequiredAt")?.toDate?.() || createdAt;
         return <article className="card" key={order.id} style={{ border: "1px solid var(--border)" }}>
           <div className="section-head"><div><strong>#{order.id.slice(0, 8)} · {order.get("serviceName")}</strong><p className="muted" style={{ marginBottom: 0 }}>{provider.label} · {Number(order.get("quantity") || 0).toLocaleString("en-NG")} units · {formatMoney(BigInt(order.get("customerPriceMinor") || 0), order.get("currency") || "NGN")}</p></div>{claimedDecision ? <span className="status-pill">{claimedDecision} recovery in progress</span> : null}</div>
+          <p className="muted">Internal: service {String(order.get("providerServiceId") || "—")} · target {String(order.get("link") || "—")} · provider cost {formatMoney(BigInt(order.get("providerCostMinor") || 0), order.get("currency") || "NGN")} · attempt {attemptAt?.toLocaleString("en-NG", { timeZone: "Africa/Lagos" }) || "—"} · {String(order.get("providerErrorCode") || "UNKNOWN")} · age {providerReviewAgeBucket(auditNowMs - (createdAt?.getTime?.() || auditNowMs))}</p>
           <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(280px, 1fr))", gap: 14, marginTop: 14 }}>
             {claimedDecision !== "rejected" ? <form action={confirmProviderAccepted} style={{ display: "grid", gap: 10 }}>
               <input type="hidden" name="orderId" value={order.id} />
@@ -111,12 +125,18 @@ export default async function ProviderHealthPage({ searchParams }: { searchParam
               <input type="hidden" name="orderId" value={order.id} />
               <label>Non-acceptance evidence<textarea className="field" name="note" rows={3} minLength={10} maxLength={500} defaultValue={reviewNote} required /></label>
               <label><input type="checkbox" name="confirmed" value="yes" required /> I confirmed no upstream order exists and approve the remaining refund.</label>
-              <button className="btn" type="submit">Mark not accepted and refund</button>
+              <button className="btn" type="submit">Refund and close</button>
+            </form> : null}
+            {!order.get("providerConfirmationRetryUsed") && !claimedDecision ? <form action={retryProviderSubmissionOnce} style={{ display: "grid", gap: 10 }}>
+              <input type="hidden" name="orderId" value={order.id} />
+              <label>Provider-dashboard verification note<textarea className="field" name="note" rows={3} minLength={10} maxLength={500} required /></label>
+              <label><input type="checkbox" name="confirmed" value="yes" required /> I checked the upstream provider, confirmed no order exists, and authorize exactly one retry.</label>
+              <button className="btn" type="submit">Confirm not created and retry once</button>
             </form> : null}
           </div>
         </article>;
       })}</div>}
-      {recoverySnapshot.size === 25 ? <p className="muted" style={{ marginBottom: 0, marginTop: 14 }}>Showing the first 25 recovery items. Resolve these before loading more.</p> : null}
+      {recoverySnapshot.size === 50 ? <p className="muted" style={{ marginBottom: 0, marginTop: 14 }}>Showing the oldest 50 recovery items. Resolve these before loading more.</p> : null}
     </section>
     <section className="glass data-table-wrap" style={{ marginTop: 22 }}><table className="data-table"><thead><tr><th>Order</th><th>Date</th><th>Provider</th><th>External ID</th><th>Service</th><th>Qty</th><th>Charge</th><th>Local status</th><th>Live status</th><th>Start</th><th>Remaining</th><th>Cancellation</th><th>Last update</th><th></th></tr></thead><tbody>{orders.map((item) => {
       const providerKey = normalizeProviderKey(item.get("providerKey")), provider = providers.find((entry) => entry.key === providerKey)!, providerId = item.get("providerOrderId"), live = providerId ? liveByProvider.get(providerKey)?.[String(providerId)] : undefined, refunded = item.get("status") === "refunded", createdAt = item.get("createdAt")?.toDate?.(), lastUpdate = item.get("lastProviderUpdate")?.toDate?.();

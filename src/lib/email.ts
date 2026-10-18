@@ -2,6 +2,21 @@ import { createHash } from "node:crypto";
 import { adminAuth } from "./firebase/admin";
 
 const escapeHtml = (value: string) => value.replace(/[&<>'"]/g, (character) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", "'": "&#39;", '"': "&quot;" })[character]!);
+export function normalizeEmailText(value: unknown) {
+  let text = String(value ?? "");
+  const named: Record<string, string> = { amp: "&", lt: "<", gt: ">", quot: '"', apos: "'", "#39": "'" };
+  for (let pass = 0; pass < 3; pass += 1) {
+    const next = text.replace(/&(?:amp|lt|gt|quot|apos|#39|#x[0-9a-f]+|#\d+);/gi, (entity) => {
+      const key = entity.slice(1, -1).toLowerCase();
+      if (key in named) return named[key];
+      const code = key.startsWith("#x") ? Number.parseInt(key.slice(2), 16) : Number.parseInt(key.slice(1), 10);
+      return Number.isSafeInteger(code) && code > 0 && code <= 0x10ffff ? String.fromCodePoint(code) : entity;
+    });
+    if (next === text) break;
+    text = next;
+  }
+  return text.replace(/[\u0000-\u001F\u007F]/g, " ").replace(/\s+/g, " ").trim();
+}
 export function brandedEmail(input: { title: string; preview: string; message: string; buttonLabel?: string; buttonUrl?: string }) {
   const app = process.env.NEXT_PUBLIC_APP_URL || "https://www.socialbooster.net.ng";
   const button = input.buttonLabel && input.buttonUrl ? `<p style="margin:28px 0"><a href="${escapeHtml(input.buttonUrl)}" style="display:inline-block;padding:14px 22px;border-radius:10px;background:#2179ee;color:#fff;text-decoration:none;font-weight:700">${escapeHtml(input.buttonLabel)}</a></p>` : "";
@@ -33,10 +48,10 @@ export async function sendBrandedEmail(input: { to: string; subject: string; htm
   throw new Error(lastError);
 }
 
-export async function sendAdminAlert(input: { subject: string; title: string; message: string; buttonLabel?: string; buttonUrl?: string }) {
+export async function sendAdminAlert(input: { subject: string; title: string; message: string; buttonLabel?: string; buttonUrl?: string; idempotencyKey?: string }) {
   const to = process.env.ADMIN_NOTIFICATION_EMAIL?.trim();
   if (!to) return;
-  await sendBrandedEmail({ to, subject: input.subject, html: brandedEmail({ title: input.title, preview: input.subject, message: input.message, buttonLabel: input.buttonLabel, buttonUrl: input.buttonUrl }) });
+  await sendBrandedEmail({ to, subject: input.subject, html: brandedEmail({ title: input.title, preview: input.subject, message: input.message, buttonLabel: input.buttonLabel, buttonUrl: input.buttonUrl }), idempotencyKey: input.idempotencyKey });
 }
 
 export async function sendUserEmail(userId: string, input: { subject: string; title: string; message: string; buttonLabel?: string; buttonUrl?: string }) {

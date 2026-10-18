@@ -17,6 +17,7 @@ const active = new Set([
   "processing",
   "in_progress",
   "cancel_requested",
+  "provider_confirmation_required",
 ]);
 function count(value: unknown) {
   if (value === null || value === undefined || value === "")
@@ -98,7 +99,7 @@ export default async function OrderPage({
           message="Your order was created successfully. Progress will appear as soon as processing begins."
         />
       ) : notice === "order-review" ? (
-        <Toast kind="info" title="Order confirmation in progress" message="Your order is recorded and protected from duplicate submission while confirmation completes." />
+        <Toast kind="info" title="Order confirmation in progress" message="We're verifying your order before processing continues. You don't need to place another order. We'll confirm delivery or resolve the charge after verification." />
       ) : notice === "cancellation-pending" ? (
         <Toast kind="success" title="Cancellation request submitted" message="The request was sent for processing. The order remains active until its live status confirms cancellation." />
       ) : notice === "cancellation-review" ? (
@@ -127,6 +128,7 @@ export default async function OrderPage({
         Order details
       </span>
       <h1 className="page-heading">{order.serviceName}</h1>
+      {order.status === "provider_confirmation_required" ? <div className="notice" role="status" style={{ marginBottom: 20 }}>{"We're verifying your order before processing continues. You don't need to place another order. We'll confirm delivery or resolve the charge after verification."}</div> : null}
       <div className="order-detail-grid">
         <article className="glass card">
           <p className="muted">Status</p>
