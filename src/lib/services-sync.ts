@@ -7,7 +7,7 @@ import { DEFAULT_GROSS_MARGIN_BPS, decimalToMinor, grossMarginBps, markupBps, se
 import { providerDefinitions, providerServiceDocumentId, type ProviderDefinition, type ProviderKey } from "./providers";
 import { choosePreferredDuplicateServices, evaluateServiceQuality, sanitizePublicCatalogCandidate } from "./service-quality";
 import { publicServiceId } from "./service-public-id";
-import { PUBLIC_CATALOG_SNAPSHOT_CHUNK_SIZE, readPublicCatalogSnapshot, writePublicCatalogSnapshot, type PublicCatalogSnapshotItem } from "./public-catalog-snapshot";
+import { PUBLIC_CATALOG_SNAPSHOT_CHUNK_SIZE, PUBLIC_CATALOG_SNAPSHOT_VERSION, readPublicCatalogSnapshot, writePublicCatalogSnapshot, type PublicCatalogSnapshotItem } from "./public-catalog-snapshot";
 
 const FINGERPRINT_VERSION = 1;
 const QUALITY_RULESET_VERSION = 3;
@@ -49,12 +49,40 @@ export function removedServiceState() {
   return { active: false, publicEligibility: "hidden", hiddenReasons: ["removed_from_provider_catalog"] } as const;
 }
 
-function safeDescription(_value: unknown, name: string, category: string) {
-  return `${name} is listed under ${category}. Review the quantity range, use the correct public profile or content link, and confirm the order details before submitting.`;
-}
-
 function hashRecord(value: unknown) {
   return createHash("sha256").update(JSON.stringify(value)).digest("hex");
+}
+
+export function combinedPublicCatalogHash(providerSnapshotHashes: Record<string, string | null>, providerCounts: Record<string, number>, publicEligibleCount: number) {
+  return hashRecord({
+    providerSnapshotHashes: Object.fromEntries(Object.entries(providerSnapshotHashes).sort(([left], [right]) => left.localeCompare(right))),
+    providerCounts: Object.fromEntries(Object.entries(providerCounts).sort(([left], [right]) => left.localeCompare(right))),
+    publicEligibleCount,
+  });
+}
+
+export async function refreshPublicCatalogManifest(successfulProviders?: number) {
+  const providers = providerDefinitions().filter((provider) => provider.configured);
+  const snapshots = await Promise.all(providers.map((provider) => readPublicCatalogSnapshot(provider.key)));
+  const eligibleByProvider = snapshots.map((snapshot) => (snapshot?.items || [])
+    .map(sanitizePublicCatalogCandidate)
+    .filter((item): item is PublicCatalogSnapshotItem => item !== null && item.active !== false));
+  const activePublicServices = choosePreferredDuplicateServices(eligibleByProvider.flat());
+  const providerCounts = Object.fromEntries(providers.map((provider, index) => [provider.key, eligibleByProvider[index].length]));
+  const providerSnapshotHashes = Object.fromEntries(providers.map((provider, index) => [provider.key, snapshots[index]?.hash || null]));
+  const combinedPublicHash = combinedPublicCatalogHash(providerSnapshotHashes, providerCounts, activePublicServices.length);
+  await adminDb().collection("publicCatalogStats").doc("current").set({
+    publicEligibleCount: activePublicServices.length,
+    providerCount: providers.length,
+    providerCounts,
+    successfulProviders: successfulProviders ?? providers.length,
+    providerSnapshotHashes,
+    snapshotHashes: providerSnapshotHashes,
+    combinedPublicHash,
+    qualityState: "EXACT_CACHED",
+    updatedAt: FieldValue.serverTimestamp(),
+  }, { merge: true });
+  return { publicEligibleCount: activePublicServices.length, providerCounts, providerSnapshotHashes, combinedPublicHash };
 }
 
 async function acquireSyncLock(provider: ProviderKey, trigger: SyncTrigger) {
@@ -183,8 +211,8 @@ export async function synchronizeProviderServices(providerKey: ProviderDefinitio
       duplicateGroups: [...duplicateCounts.values()].filter((count) => count > 1).length,
     };
     const fingerprints = normalized.map(({ id, fingerprint }) => ({ id, fingerprint })), catalogueHash = providerCatalogueHash(fingerprints);
-    if (lock.state.catalogueHash === catalogueHash && lock.state.fingerprintVersion === FINGERPRINT_VERSION && lock.state.qualityRulesetVersion === QUALITY_RULESET_VERSION) {
-      const result = { provider: provider.key, providerCurrency, providerBalance: balance.balance, providerFunded, serviceCount: rows.length, publicServiceCount: Number(lock.state.publicServiceCount || 0), qualitySummary, changedCount: 0, repricedCount: 0, unchangedCount: rows.length, shortCircuited: true, durationMs: Date.now() - startedAt };
+    if (lock.state.catalogueHash === catalogueHash && lock.state.fingerprintVersion === FINGERPRINT_VERSION && lock.state.qualityRulesetVersion === QUALITY_RULESET_VERSION && lock.state.publicCatalogSnapshotVersion === PUBLIC_CATALOG_SNAPSHOT_VERSION) {
+      const result = { provider: provider.key, providerCurrency, providerBalance: balance.balance, providerFunded, serviceCount: rows.length, publicServiceCount: Number(lock.state.publicServiceCount || 0), qualitySummary, publicCatalogueChanged: false, changedCount: 0, repricedCount: 0, unchangedCount: rows.length, shortCircuited: true, durationMs: Date.now() - startedAt };
       const metrics = { providerRowsReturned: rows.length, firestoreReads: 2, firestoreRecordsCompared: 0, newRecords: 0, changedRecords: 0, removedRecords: 0, unchangedRecords: rows.length, firestoreWrites: 4, publicSnapshotChanged: false, fallbackActivated: false, shortCircuited: true };
       await finishSync(lock.ref, lock.token, { ...result, status: "completed", lastMetrics: metrics, lastHeartbeatAt: FieldValue.serverTimestamp() });
       await recordSyncRun(provider.key, startedAt, metrics);
@@ -192,11 +220,14 @@ export async function synchronizeProviderServices(providerKey: ProviderDefinitio
     }
 
     const qualityMigration = lock.state.qualityRulesetVersion !== QUALITY_RULESET_VERSION;
+    const publicSnapshotMigration = lock.state.publicCatalogSnapshotVersion !== PUBLIC_CATALOG_SNAPSHOT_VERSION;
     const previousFingerprints = await readFingerprintSnapshot(provider.key, lock.state);
     const legacyBaseline = !previousFingerprints && (lock.state.completedAt || Number(lock.state.serviceCount || 0) > 0);
     const diff = previousFingerprints ? diffProviderFingerprints(previousFingerprints, fingerprints) : legacyBaseline ? { added: [], changed: [], removed: [], unchanged: rows.length } : { added: fingerprints.map((entry) => entry.id), changed: [], removed: [], unchanged: 0 };
     const changedIds = [...diff.added, ...diff.changed], existing = await getChangedDocuments(changedIds);
-    const previousPublic = await readPublicCatalogSnapshot(provider.key), publicMap = new Map((previousPublic?.items || []).map((item) => [item.internalId, item]));
+    const previousPublic = await readPublicCatalogSnapshot(provider.key);
+    const previousPublicMap = new Map((previousPublic?.items || []).map((item) => [item.internalId, item]));
+    const publicMap = new Map(previousPublicMap);
     const rowMap = new Map(normalized.map((row) => [row.id, row]));
     const db = adminDb(), writer = db.bulkWriter(); writer.onWriteError((error) => error.failedAttempts < 3);
     let serviceWrites = 0;
@@ -204,16 +235,19 @@ export async function synchronizeProviderServices(providerKey: ProviderDefinitio
     const publicItemFor = (row: typeof normalized[number], stored?: FirebaseFirestore.DocumentData): PublicCatalogSnapshotItem | null => {
       const sellingRateMinor = sellingPriceForGrossMarginMinor(row.providerRateNgnMinor, grossMarginTargetBps);
       const quality = qualityById.get(row.id)!;
-      const old = publicMap.get(row.id), visibilityOverride = stored?.visibilityOverride === "show" || stored?.visibilityOverride === "hide" ? stored.visibilityOverride : null;
+      const old = previousPublicMap.get(row.id), visibilityOverride = stored?.visibilityOverride === "show" || stored?.visibilityOverride === "hide" ? stored.visibilityOverride : null;
       const active = quality.publicEligible && visibilityOverride !== "hide" && (visibilityOverride === "show" || old?.active !== false);
       if (!quality.publicEligible) return null;
-      const name = typeof stored?.publicNameOverride === "string" && stored.publicNameOverride.trim() ? stored.publicNameOverride.trim().slice(0, 140) : quality.publicName;
-      return { id: publicServiceId(row.id), internalId: row.id, name, category: quality.normalizedCategory, type: row.item.type, description: safeDescription(row.providerData.description, name, quality.normalizedCategory), min: row.item.min, max: row.item.max, refill: row.item.refill, cancel: row.item.cancel, rateMinor: Number(sellingRateMinor), updatedAt: new Date().toISOString(), seoEligible: quality.publicEligible && (stored?.seoEligibilityOverride === "index" || old?.seoEligible === true), featured: quality.publicEligible && (stored?.featured === true || old?.featured === true), paidAdsEligible: quality.publicEligible && (stored?.paidAdsEligible === true || old?.paidAdsEligible === true), active };
+      const name = typeof stored?.publicNameOverride === "string" && stored.publicNameOverride.trim()
+        ? stored.publicNameOverride.trim().slice(0, 140)
+        : publicSnapshotMigration && old?.name ? old.name : quality.publicName;
+      return { id: publicServiceId(row.id), internalId: row.id, name, category: quality.normalizedCategory, type: row.item.type, min: row.item.min, max: row.item.max, refill: row.item.refill, cancel: row.item.cancel, rateMinor: Number(sellingRateMinor), updatedAt: new Date().toISOString(), seoEligible: quality.publicEligible && (stored?.seoEligibilityOverride === "index" || old?.seoEligible === true), featured: quality.publicEligible && (stored?.featured === true || old?.featured === true), paidAdsEligible: quality.publicEligible && (stored?.paidAdsEligible === true || old?.paidAdsEligible === true), active };
     };
 
-    if (legacyBaseline || qualityMigration) {
+    if (legacyBaseline || qualityMigration || publicSnapshotMigration) {
       // Bootstrap compact state from the already synchronized catalogue without
       // reading or rewriting all service documents.
+      publicMap.clear();
       for (const row of normalized) {
         const item = publicItemFor(row);
         if (item) publicMap.set(row.id, item); else publicMap.delete(row.id);
@@ -243,11 +277,11 @@ export async function synchronizeProviderServices(providerKey: ProviderDefinitio
     await writer.close();
     const publicSnapshot = await writePublicCatalogSnapshot(provider.key, [...publicMap.values()]);
     const fingerprintSnapshot = await writeFingerprintSnapshot(provider.key, lock.state, fingerprints, catalogueHash);
-    const result = { provider: provider.key, providerCurrency, providerBalance: balance.balance, providerFunded, serviceCount: rows.length, publicServiceCount: publicMap.size, qualitySummary, publicCatalogSnapshot: publicSnapshot, changedCount: changedIds.length + diff.removed.length, repricedCount: changedIds.length, unchangedCount: diff.unchanged, shortCircuited: false, baselineInitialized: legacyBaseline, durationMs: Date.now() - startedAt };
+    const result = { provider: provider.key, providerCurrency, providerBalance: balance.balance, providerFunded, serviceCount: rows.length, publicServiceCount: publicMap.size, qualitySummary, publicCatalogSnapshot: publicSnapshot, publicCatalogueChanged: publicSnapshot.changed, changedCount: changedIds.length + diff.removed.length, repricedCount: changedIds.length, unchangedCount: diff.unchanged, shortCircuited: false, baselineInitialized: legacyBaseline, durationMs: Date.now() - startedAt };
     const fingerprintChunkReads = Math.ceil((previousFingerprints?.length || 0) / FINGERPRINT_CHUNK_SIZE);
     const publicSnapshotReads = 1 + Math.ceil((previousPublic?.items.length || 0) / PUBLIC_CATALOG_SNAPSHOT_CHUNK_SIZE);
     const metrics = { providerRowsReturned: rows.length, firestoreReads: 4 + fingerprintChunkReads + publicSnapshotReads + changedIds.length * 2, firestoreRecordsCompared: previousFingerprints?.length || 0, newRecords: diff.added.length, changedRecords: diff.changed.length, removedRecords: diff.removed.length, unchangedRecords: diff.unchanged, firestoreWrites: serviceWrites + fingerprintSnapshot.chunkCount + (publicSnapshot.changed ? publicSnapshot.chunkCount + 1 : 0) + 4, publicSnapshotChanged: publicSnapshot.changed, fallbackActivated: previousPublic?.fallbackUsed === true, shortCircuited: false, baselineInitialized: legacyBaseline };
-    await finishSync(lock.ref, lock.token, { ...result, status: "completed", catalogueHash, fingerprintVersion: FINGERPRINT_VERSION, qualityRulesetVersion: QUALITY_RULESET_VERSION, activeFingerprintSlot: fingerprintSnapshot.slot, fingerprintChunkCount: fingerprintSnapshot.chunkCount, fingerprintSlots: fingerprintSnapshot.slots, publicCatalogueHash: publicSnapshot.hash, lastMetrics: metrics, lastHeartbeatAt: FieldValue.serverTimestamp() });
+    await finishSync(lock.ref, lock.token, { ...result, status: "completed", catalogueHash, fingerprintVersion: FINGERPRINT_VERSION, qualityRulesetVersion: QUALITY_RULESET_VERSION, publicCatalogSnapshotVersion: PUBLIC_CATALOG_SNAPSHOT_VERSION, activeFingerprintSlot: fingerprintSnapshot.slot, fingerprintChunkCount: fingerprintSnapshot.chunkCount, fingerprintSlots: fingerprintSnapshot.slots, publicCatalogueHash: publicSnapshot.hash, lastMetrics: metrics, lastHeartbeatAt: FieldValue.serverTimestamp() });
     await recordSyncRun(provider.key, startedAt, metrics);
     console.info("[services:sync] completed", result);
     return result;
@@ -266,20 +300,7 @@ export async function synchronizeAllProviderServices() {
   const failures = settled.flatMap((item, index) => item.status === "rejected" ? [{ provider: providers[index].key, error: item.reason instanceof Error ? item.reason.message : String(item.reason) }] : []);
   failures.forEach((failure) => console.error("[services:sync] provider failed", failure));
   if (!results.length) throw new Error("Every configured provider failed to synchronize");
-  const snapshots = await Promise.all(providers.map((provider) => readPublicCatalogSnapshot(provider.key)));
-  const activePublicServices = choosePreferredDuplicateServices(
-    snapshots
-      .flatMap((snapshot) => snapshot?.items || [])
-      .map(sanitizePublicCatalogCandidate)
-      .filter((item): item is PublicCatalogSnapshotItem => item !== null && item.active !== false),
-  );
-  await adminDb().collection("publicCatalogStats").doc("current").set({
-    publicEligibleCount: activePublicServices.length,
-    providerCount: providers.length,
-    successfulProviders: results.length,
-    snapshotHashes: Object.fromEntries(providers.map((provider, index) => [provider.key, snapshots[index]?.hash || null])),
-    qualityState: "EXACT_CACHED",
-    updatedAt: FieldValue.serverTimestamp(),
-  }, { merge: true });
-  return { providerCount: providers.length, successfulProviders: results.length, failedProviders: failures.length, serviceCount: results.reduce((sum, item) => sum + item.serviceCount, 0), changedCount: results.reduce((sum, item) => sum + item.changedCount, 0), repricedCount: results.reduce((sum, item) => sum + item.repricedCount, 0), providers: results, failures };
+  const publicCatalogueChanged = results.some((result) => result.publicCatalogueChanged);
+  if (publicCatalogueChanged) await refreshPublicCatalogManifest(results.length);
+  return { providerCount: providers.length, successfulProviders: results.length, failedProviders: failures.length, serviceCount: results.reduce((sum, item) => sum + item.serviceCount, 0), publicCatalogueChanged, changedCount: results.reduce((sum, item) => sum + item.changedCount, 0), repricedCount: results.reduce((sum, item) => sum + item.repricedCount, 0), providers: results, failures };
 }

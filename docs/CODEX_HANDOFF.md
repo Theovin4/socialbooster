@@ -272,3 +272,33 @@ Production release evidence:
 - Signed-in, read-only production smoke testing confirmed `/admin/provider` loads six `provider_confirmation_required` orders, all in the `>24 hours` bucket and all under Followpanel. Nitro and SMM World each had zero. The page exposed attach, retry-once and refund-and-close controls, while all provider health cards were `ACTIVE` with zero recent ambiguous submissions.
 - A post-deployment reload confirmed legacy service names render a normal ampersand rather than literal `&amp;`. `/admin/acquisition` also remained available with first/last-touch source, medium, campaign, registrations, first orders, repeat orders, revenue and gross profit; the page explicitly states wallet funding is never revenue and Firestore does not log pageviews.
 - No recovery form was filled or submitted. No provider `add`, payment, wallet credit/debit, refund, referral reward, catalogue sync or customer-data mutation was performed during smoke testing.
+
+## Firestore network egress optimization — 19 October 2026
+
+Baseline before this pass was clean `main` at `9c986d376c930b3e1fedf262e3448cffcdf5703c`. The local release candidate reduces Firestore bytes transferred to Vercel without changing authentication, payments, wallets, orders, provider recovery, Finance, provider pricing, or the required 40% gross margin.
+
+- Provider synchronization now reports whether the public catalogue actually changed. Unchanged daily runs do not invalidate the catalogue cache and do not reread all public snapshots to reconfirm the same exact count.
+- A compact global manifest holds exact public count, per-provider counts and hashes, and a stable combined public hash. It updates only with a published catalogue change.
+- Public snapshot v3 removes the repeated formulaic description and derives it at render time. The current 3.98 MB snapshot is projected to become 2.34 MB, saving 1.64 MB (41%) per cold reconstruction.
+- Public chunks are cached by provider, version/slot, immutable hash, and index without time expiry or broad invalidation. Descriptor and result-page caches no longer force a 24-hour reload. Service detail remains on cached public data.
+- The bounded production audit measured 45 public chunks, 25 fingerprint chunks, one support attachment document, and no customer attachment content. Unchanged daily sync falls from an estimated 102 reads / 7.97 MB to 6 reads / 10 KB.
+- The support attachment is preserved in place. A future object-storage design is recommended only if volume becomes material; migration is not part of this release.
+
+Full measurements, ranked large-payload findings, cache behavior, planning estimates, and the guarded audit procedure are documented in `docs/FIRESTORE_EGRESS_AUDIT.md`.
+
+Validation for this candidate:
+
+| Gate | Result |
+| --- | --- |
+| Full test suite | Passed: 34 files / 171 tests |
+| TypeScript | Passed: `tsc --noEmit` |
+| ESLint | Passed with zero warnings |
+| Production build | Passed: compilation, TypeScript, page-data collection, and all 88 generated pages |
+| Firebase Rules | Passed: 3 rule regression tests within the full suite |
+| Production dependency audit | Passed: zero vulnerabilities |
+| Tracked-file secret scan | Passed |
+| Production data mutation | None; the audit was bounded and read-only |
+
+The engineering estimate is 15–100 MB/month at current low traffic after release, comfortably below the preferred 1 GiB/month budget and required 10 GiB/month ceiling. The candidate is **SAFE FOR SPARK NEXT MONTH**, subject to comparing at least seven normal post-release days with the Cloud Billing `Cloud Firestore Internet Data Transfer Out` SKU.
+
+Next steps should stay small: (1) review and release this candidate, (2) allow the next guarded provider synchronization to migrate snapshots to v3 without manually triggering a live sync for testing, (3) observe seven days of billing telemetry, then (4) consider a separately tested provider-text bound and object-storage plan only if measurements justify them. This pass is not deployed and has not triggered a provider sync, payment, order, refund, wallet mutation, or attachment migration.

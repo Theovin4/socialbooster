@@ -12,7 +12,7 @@ export async function GET(request: Request) {
     const [services, stats] = await Promise.allSettled([synchronizeAllProviderServices(), resetJoinedToday()]);
     if (services.status === "rejected" && stats.status === "rejected") throw services.reason;
     if (services.status === "rejected") console.error("[services:sync] provider synchronization failed", { error: services.reason instanceof Error ? services.reason.message : String(services.reason) });
-    else revalidateTag("active-service-catalog", "max");
+    else if (services.value.publicCatalogueChanged) revalidateTag("active-service-catalog", "max");
     if (stats.status === "rejected") console.error("[services:sync] daily counter reset failed", { error: stats.reason instanceof Error ? stats.reason.message : String(stats.reason) });
     return Response.json({ ok: true, services: services.status === "fulfilled" ? services.value : { error: "Provider synchronization failed" }, stats: stats.status === "fulfilled" ? stats.value : { error: "Daily counter reset failed" } });
   }

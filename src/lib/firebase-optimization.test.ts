@@ -1,10 +1,10 @@
 import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
-import { publicCatalogHash, shouldPublishPublicSnapshot, type PublicCatalogSnapshotItem } from "./public-catalog-snapshot";
+import { compactPublicCatalogItem, publicCatalogHash, shouldPublishPublicSnapshot, type PublicCatalogSnapshotItem } from "./public-catalog-snapshot";
 
 const item: PublicCatalogSnapshotItem = {
   id: "service_public_1", internalId: "followspanel_1", name: "Service", category: "Instagram", type: "Default",
-  description: "Public description", min: 10, max: 10_000, refill: true, cancel: false, rateMinor: 1_400,
+  min: 10, max: 10_000, refill: true, cancel: false, rateMinor: 1_400,
   updatedAt: "2026-01-01T00:00:00.000Z", seoEligible: true, featured: false, paidAdsEligible: false, active: true,
 };
 
@@ -13,6 +13,37 @@ describe("Firebase optimization architecture", () => {
     const hash = publicCatalogHash([item]);
     expect(shouldPublishPublicSnapshot(hash, publicCatalogHash([{ ...item, updatedAt: "2026-10-01T00:00:00.000Z" }]))).toBe(false);
     expect(shouldPublishPublicSnapshot(hash, publicCatalogHash([{ ...item, rateMinor: 1_500 }]))).toBe(true);
+  });
+
+  it("keeps immutable catalogue chunks cached by snapshot hash without time expiry or broad invalidation", () => {
+    const catalog = readFileSync(new URL("./service-catalog.ts", import.meta.url), "utf8");
+    const chunkCache = catalog.slice(catalog.indexOf("const getCachedSnapshotChunk"), catalog.indexOf("type DescriptorSlot"));
+    expect(chunkCache).toContain("active-service-catalog-chunk-v2-immutable");
+    expect(chunkCache).toContain("provider: ProviderKey, version: PublicCatalogSnapshotVersion");
+    expect(chunkCache).toContain("index: number, hash: string");
+    expect(chunkCache).not.toContain("revalidate:");
+    expect(chunkCache).not.toContain("tags:");
+    expect(catalog).not.toContain("revalidate: 86_400");
+  });
+
+  it("invalidates the catalogue only after a public snapshot change", () => {
+    const cron = readFileSync(new URL("../app/api/cron/services/route.ts", import.meta.url), "utf8");
+    const admin = readFileSync(new URL("../app/admin/services/actions.ts", import.meta.url), "utf8");
+    const sync = readFileSync(new URL("./services-sync.ts", import.meta.url), "utf8");
+    expect(cron).toContain("services.value.publicCatalogueChanged");
+    expect(admin).toContain("refresh(publicCatalogueChanged)");
+    expect(sync).toContain("publicCatalogueChanged");
+    expect(sync).toContain("combinedPublicHash");
+    expect(sync).toContain("providerSnapshotHashes");
+  });
+
+  it("derives repeated service descriptions instead of storing them in snapshot rows", () => {
+    const snapshot = readFileSync(new URL("./public-catalog-snapshot.ts", import.meta.url), "utf8");
+    const sync = readFileSync(new URL("./services-sync.ts", import.meta.url), "utf8");
+    const itemShape = snapshot.slice(snapshot.indexOf("export type PublicCatalogSnapshotItem"), snapshot.indexOf("export type SnapshotSlot"));
+    expect(itemShape).not.toContain("description");
+    expect(sync).not.toContain("safeDescription");
+    expect(compactPublicCatalogItem({ ...item, description: "legacy repeated text" } as PublicCatalogSnapshotItem & { description: string })).not.toHaveProperty("description");
   });
 
   it("never lets an anonymous catalogue request scan services", () => {
