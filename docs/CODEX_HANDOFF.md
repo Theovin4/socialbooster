@@ -1,6 +1,6 @@
 # Social Booster Codex handoff
 
-Snapshot date: 16 October 2026 (Africa/Lagos)
+Snapshot date: 19 October 2026 (Africa/Lagos)
 
 ## Recovery and repository state
 
@@ -17,9 +17,11 @@ The interrupted work was recovered from the existing checkout. Nothing was rebui
 | Catalogue-cache completion commit | `73463b6591234ebb74808cec2d6bfedc9388737d` — `Initialize missing catalogue analytics cache` |
 | Growth-pass baseline | `9026abfe466a6f3b4bd6450a99daebe2bfbf810c` — `Finalize finance repair handoff` |
 | Growth enablement checkpoint | `674b585` — `Implement Social Booster growth enablement` |
+| Provider recovery hardening | `5cdc74e` — `Harden provider confirmation recovery` |
+| Legacy entity display fix | `f32d853` — `Normalize legacy service names in recovery views` |
 | Firebase project | `socialbooster-cbcc6` |
 | Production site | `https://www.socialbooster.net.ng` |
-| Working tree | Combined Growth Enablement + Provider Confirmation Recovery candidate complete and locally verified; no production data changed during validation |
+| Working tree | Combined Growth Enablement + Provider Confirmation Recovery released and production-smoke-tested; no payment, provider order, refund or reward was triggered during validation |
 
 No real payment, order, refill, cancellation, provider submission, crypto approval, wallet mutation, customer-data mutation, or manual provider synchronization was used during this repair.
 
@@ -262,3 +264,10 @@ Hardening validation before release:
 | Live financial/provider testing | Not performed by design |
 
 Next work should remain phased: (1) monitor the deployed queue and alert stages read-only, (2) add emulator-backed concurrency tests for retry/refund claims, then (3) upgrade development tooling in a separate branch with full regression coverage. Never use the recovery controls without first checking the upstream provider dashboard.
+
+Production release evidence:
+
+- Vercel production deployment `dpl_6nZjenEhs7HPejVcdXdyuG8AiJRd` reached `READY` for exact commit `5cdc74ec11d3cc9113ed31915d28155846327299` on the existing `socialbooster` project and aliases. The follow-up legacy-entity view fix is commit `f32d853` and must be confirmed on its subsequent production deployment.
+- Firestore rules compiled and were released to existing project `socialbooster-cbcc6`; no indexes or operational documents were deployed or modified by that command.
+- Signed-in, read-only production smoke testing confirmed `/admin/provider` loads six `provider_confirmation_required` orders, all in the `>24 hours` bucket and all under Followpanel. Nitro and SMM World each had zero. The page exposed attach, retry-once and refund-and-close controls, while all provider health cards were `ACTIVE` with zero recent ambiguous submissions.
+- No recovery form was filled or submitted. No provider `add`, payment, wallet credit/debit, refund, referral reward, catalogue sync or customer-data mutation was performed during smoke testing.
