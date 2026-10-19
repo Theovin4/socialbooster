@@ -66,6 +66,8 @@ describe("provider confirmation recovery", () => {
     expect(message).not.toMatch(/Followpanel|Nitro|SMM World|provider order|provider cost/i);
     expect(orders).toContain("providerCostIncurredMinor: 0");
     expect(orders).toContain("String(local.providerLabel)");
+    const providerPage = readFileSync(new URL("../app/admin/provider/page.tsx", import.meta.url), "utf8");
+    expect(providerPage).toContain('normalizeEmailText(order.get("serviceName"))');
   });
 
   it("keeps customer API status responses free of provider identity fields", () => {
