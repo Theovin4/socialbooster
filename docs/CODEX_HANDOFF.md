@@ -267,7 +267,8 @@ Next work should remain phased: (1) monitor the deployed queue and alert stages 
 
 Production release evidence:
 
-- Vercel production deployment `dpl_6nZjenEhs7HPejVcdXdyuG8AiJRd` reached `READY` for exact commit `5cdc74ec11d3cc9113ed31915d28155846327299` on the existing `socialbooster` project and aliases. The follow-up legacy-entity view fix is commit `f32d853` and must be confirmed on its subsequent production deployment.
+- Final Vercel production deployment `dpl_BV2FNrLKrg8v5XsZJf2Q8RnodVhQ` reached `READY` for exact release-handoff commit `78721bbed53f48e9df463545cc5dfed0a116be55` on the existing `socialbooster` project and aliases. It includes provider hardening `5cdc74e` and the verified legacy-entity display fix `f32d853`.
 - Firestore rules compiled and were released to existing project `socialbooster-cbcc6`; no indexes or operational documents were deployed or modified by that command.
 - Signed-in, read-only production smoke testing confirmed `/admin/provider` loads six `provider_confirmation_required` orders, all in the `>24 hours` bucket and all under Followpanel. Nitro and SMM World each had zero. The page exposed attach, retry-once and refund-and-close controls, while all provider health cards were `ACTIVE` with zero recent ambiguous submissions.
+- A post-deployment reload confirmed legacy service names render a normal ampersand rather than literal `&amp;`. `/admin/acquisition` also remained available with first/last-touch source, medium, campaign, registrations, first orders, repeat orders, revenue and gross profit; the page explicitly states wallet funding is never revenue and Firestore does not log pageviews.
 - No recovery form was filled or submitted. No provider `add`, payment, wallet credit/debit, refund, referral reward, catalogue sync or customer-data mutation was performed during smoke testing.
