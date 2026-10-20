@@ -11,6 +11,7 @@ import { requestCancellation, requestRefill } from "../request-actions";
 import { AnalyticsEvent } from "@/components/analytics-event";
 import { publicServiceId } from "@/lib/service-public-id";
 import { normalizeEmailText } from "@/lib/email";
+import { orderProgress } from "@/lib/order-tracking";
 
 export const dynamic = "force-dynamic";
 const active = new Set([
@@ -62,26 +63,7 @@ export default async function OrderPage({
     : 0;
   const purchaseStage = completedOrderCount > 0 ? "repeat_purchase" : "first_order";
   const quantity = Number(order.quantity || 0);
-  const remaining =
-    String(order.status) === "completed"
-      ? 0
-      : order.remains === null ||
-          order.remains === undefined ||
-          order.remains === ""
-        ? Number.NaN
-        : Number(order.remains);
-  const progress =
-    String(order.status) === "completed"
-      ? 100
-      : Number.isFinite(remaining) && quantity > 0
-        ? Math.max(
-            0,
-            Math.min(
-              100,
-              Math.round(((quantity - remaining) * 100) / quantity),
-            ),
-          )
-        : 0;
+  const tracking = orderProgress({ quantity, remains: order.remains, status: order.status });
   const lastUpdate = order.lastProviderUpdate
     ?.toDate?.()
     .toLocaleString("en-NG", {
@@ -148,10 +130,14 @@ export default async function OrderPage({
         <article className="glass card">
           <p className="muted">Remaining</p>
           <strong>
-            {Number.isFinite(remaining)
-              ? remaining.toLocaleString("en-NG")
+            {tracking.remaining !== null
+              ? tracking.remaining.toLocaleString("en-NG")
               : "Waiting for update"}
           </strong>
+        </article>
+        <article className="glass card">
+          <p className="muted">Delivered</p>
+          <strong>{tracking.delivered !== null ? tracking.delivered.toLocaleString("en-NG") : "Waiting for update"}</strong>
         </article>
         <article className="glass card">
           <p className="muted">Total charge</p>
@@ -164,7 +150,7 @@ export default async function OrderPage({
         <div className="section-head">
           <div>
             <span className="eyebrow">Delivery progress</span>
-            <h2>{progress}% delivered</h2>
+            <h2>{tracking.percent === null ? "Waiting for provider update" : `${tracking.percent}% delivered`}</h2>
           </div>
           <Link className="btn" href={`/dashboard/orders/${id}?refresh=1`}>
             {active.has(String(order.status))
@@ -174,15 +160,16 @@ export default async function OrderPage({
         </div>
         <div
           className="progress-track large"
-          aria-label={`${progress}% delivered`}
+          aria-label={tracking.percent === null ? "Waiting for provider update" : `${tracking.percent}% delivered`}
         >
-          <span style={{ width: `${progress}%` }} />
+          <span style={{ width: `${tracking.percent || 0}%` }} />
         </div>
         <p className="muted">
           {lastUpdate
             ? `Last service update: ${lastUpdate}`
             : "The start count and remaining quantity will appear after the first service update."}
         </p>
+        {order.status === "partial" && order.refundStatus === "posted" && Number(order.refundedAmountMinor || 0) > 0 ? <div className="notice" role="status"><strong>{formatMoney(BigInt(order.refundedAmountMinor), order.currency)} returned</strong><p style={{ marginBottom: 0 }}>Part of this order was delivered. The value of the undelivered quantity has been returned to your wallet.</p></div> : null}
       </section>
       <div className="glass card" style={{ marginTop: 20 }}>
         <p className="muted">Target link</p>

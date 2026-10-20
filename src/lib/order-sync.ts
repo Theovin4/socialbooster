@@ -6,21 +6,33 @@ import { getProvider, normalizeProviderKey } from "./providers";
 import { verifiedProviderStatus } from "./order-status";
 import { sendUserEmail } from "./email";
 import { orderStatusEmailCopy, shouldSendOrderStatusEmail } from "./order-email-policy";
-import { terminalRefundDecision } from "./order-refund-policy";
+import { remainingRefundAmount, terminalRefundDecision } from "./order-refund-policy";
 import { recordCompletedOrderMarketing } from "./marketing-profile";
 import { recordFinanceOrderStatus } from "./firebase/analytics-rollups";
 import { lagosDateKey } from "./firebase/stats";
 import { createCustomerNotification } from "./customer-notifications";
+import { providerConfirmationRefundKeys } from "./provider-confirmation-recovery";
+import { nonNegativeInteger, orderProgress } from "./order-tracking";
 
 const STALE_AFTER_MS = 60_000;
+const PROVIDER_STATUS_BATCH_SIZE = 100;
 
-function integer(value: string | undefined) {
-  if (value === undefined || value === "") return null;
-  const parsed = Number(value);
-  return Number.isSafeInteger(parsed) && parsed >= 0 ? parsed : null;
-}
+export type ProviderStatusResult = {
+  charge?: string;
+  start_count?: string;
+  status: string;
+  remains?: string;
+  currency?: string;
+};
 
-export async function synchronizeOrderDocuments(documents: DocumentSnapshot[], force = false) {
+export type PrefetchedProviderStatuses = Map<string, Record<string, ProviderStatusResult>>;
+
+/** Shared provider-status persistence for cron, admin, customer and recovery paths. */
+export async function synchronizeOrderDocuments(
+  documents: DocumentSnapshot[],
+  force = false,
+  prefetchedStatuses?: PrefetchedProviderStatuses,
+) {
   const now = Date.now();
   const eligible = documents.filter((doc) => {
     if (!Number.isInteger(doc.get("providerOrderId"))) return false;
@@ -29,77 +41,126 @@ export async function synchronizeOrderDocuments(documents: DocumentSnapshot[], f
     return now - updated >= STALE_AFTER_MS;
   });
   if (!eligible.length) return { checked: 0, updated: 0 };
+
   const db = adminDb();
   const grouped = new Map<string, DocumentSnapshot[]>();
   for (const doc of eligible) {
     const key = normalizeProviderKey(doc.get("providerKey"));
     grouped.set(key, [...(grouped.get(key) || []), doc]);
   }
-  const statusesByProvider = new Map<string, Record<string, { charge?: string; start_count?: string; status: string; remains?: string; currency?: string }>>();
+
+  const statusesByProvider = new Map<string, Record<string, ProviderStatusResult>>();
   await Promise.all(Array.from(grouped.entries()).map(async ([key, docs]) => {
+    const supplied = prefetchedStatuses?.get(key) || {};
+    const missingIds = docs
+      .map((doc) => Number(doc.get("providerOrderId")))
+      .filter((id) => !supplied[String(id)]);
     const provider = getProvider(key);
-    if (!provider.configured) { console.warn("[order-sync] provider not configured", { providerKey: key, orderCount: docs.length }); return; }
-    try { statusesByProvider.set(key, await provider.client.statuses(docs.map((doc) => Number(doc.get("providerOrderId"))))); }
-    catch (error) { console.error("[order-sync] provider status failed", { providerKey: key, orderCount: docs.length, error: error instanceof Error ? error.message : String(error) }); }
+    if (!provider.configured && missingIds.length) {
+      console.warn("[order-sync] provider not configured", { providerKey: key, orderCount: missingIds.length });
+      if (Object.keys(supplied).length) statusesByProvider.set(key, supplied);
+      return;
+    }
+    try {
+      const batches: Array<Record<string, ProviderStatusResult>> = [];
+      for (let offset = 0; offset < missingIds.length; offset += PROVIDER_STATUS_BATCH_SIZE) {
+        batches.push(await provider.client.statuses(missingIds.slice(offset, offset + PROVIDER_STATUS_BATCH_SIZE)));
+      }
+      statusesByProvider.set(key, Object.assign({}, supplied, ...batches));
+    } catch (error) {
+      console.error("[order-sync] provider status failed", { providerKey: key, orderCount: missingIds.length, error: error instanceof Error ? error.message : String(error) });
+      if (Object.keys(supplied).length) statusesByProvider.set(key, supplied);
+    }
   }));
+
   let updated = 0;
   for (const doc of eligible) {
     const providerKey = normalizeProviderKey(doc.get("providerKey"));
-    const provider = statusesByProvider.get(providerKey)?.[String(doc.get("providerOrderId"))];
+    const providerOrderId = Number(doc.get("providerOrderId"));
+    const provider = statusesByProvider.get(providerKey)?.[String(providerOrderId)];
     if (!provider) continue;
-    const startCount = integer(provider.start_count);
-    const remains = integer(provider.remains);
+
+    const startCount = nonNegativeInteger(provider.start_count);
+    const remains = nonNegativeInteger(provider.remains);
     const candidateStatus = verifiedProviderStatus(provider.status, startCount, remains);
-    const previous = doc.get("status");
-    const quantity = integer(String(doc.get("quantity") ?? "")) || 0;
+    const previous = String(doc.get("status") || "pending");
+    const quantity = nonNegativeInteger(doc.get("quantity")) || 0;
     const firstObservedAtMs = doc.get("refundReviewFirstSeenAt")?.toMillis?.() || null;
-    const refundDecision = terminalRefundDecision({ status: candidateStatus, quantity, remains, previousObservation: doc.get("refundReviewStatus") || null, firstObservedAtMs, nowMs: now });
+    const refundDecision = doc.get("refundStatus") === "posted"
+      ? "none"
+      : terminalRefundDecision({ status: candidateStatus, quantity, remains, previousObservation: doc.get("refundReviewStatus") || null, firstObservedAtMs, nowMs: now });
     const status = ["stage", "hold", "reject"].includes(refundDecision) ? previous : candidateStatus;
-    console.info("[order-sync] provider status", { orderId: doc.id, providerKey, providerOrderId: doc.get("providerOrderId"), providerStatus: provider.status, resolvedStatus: candidateStatus, persistedStatus: status, refundDecision, startCount, remains });
-    const update: Record<string, unknown> = { status, providerStatus: provider.status, providerCharge: provider.charge || null, lastProviderUpdate: FieldValue.serverTimestamp(), updatedAt: FieldValue.serverTimestamp() };
-    if (refundDecision === "stage") Object.assign(update, { refundReviewStatus: candidateStatus, refundReviewFirstSeenAt: FieldValue.serverTimestamp(), refundReviewConfirmations: 1 });
-    if (refundDecision === "hold") update.refundReviewConfirmations = FieldValue.increment(1);
-    if (refundDecision === "confirm") Object.assign(update, { refundReviewConfirmedAt: FieldValue.serverTimestamp(), refundReviewConfirmations: FieldValue.increment(1) });
-    if (refundDecision === "reject") Object.assign(update, { refundReviewRejectedAt: FieldValue.serverTimestamp(), refundReviewReason: "Provider terminal response did not include valid refundable quantities" });
+    const effectiveRemains = remains ?? nonNegativeInteger(doc.get("remains"));
+    const progress = orderProgress({ quantity, remains: effectiveRemains, status });
+    console.info("[order-sync] provider status", { orderId: doc.id, providerKey, providerOrderId, providerStatus: provider.status, resolvedStatus: candidateStatus, persistedStatus: status, refundDecision, startCount, remains });
+
+    const update: Record<string, unknown> = {
+      status,
+      providerStatus: provider.status,
+      providerCharge: provider.charge || null,
+      lastProviderUpdate: FieldValue.serverTimestamp(),
+      updatedAt: FieldValue.serverTimestamp(),
+    };
+    if (progress.delivered !== null) update.deliveredQuantity = progress.delivered;
+    if (progress.percent !== null) update.progressPercent = progress.percent;
+    if (refundDecision === "stage") Object.assign(update, { refundReviewStatus: candidateStatus, refundReviewFirstSeenAt: FieldValue.serverTimestamp(), refundReviewConfirmations: 1, refundStatus: "pending_confirmation", refundableQuantity: candidateStatus === "partial" ? remains : quantity });
+    if (refundDecision === "hold") Object.assign(update, { refundReviewConfirmations: FieldValue.increment(1), refundStatus: "pending_confirmation" });
+    if (refundDecision === "confirm") Object.assign(update, { refundReviewConfirmedAt: FieldValue.serverTimestamp(), refundReviewConfirmations: FieldValue.increment(1), refundableQuantity: candidateStatus === "partial" ? remains : quantity });
+    if (refundDecision === "reject") Object.assign(update, { refundReviewRejectedAt: FieldValue.serverTimestamp(), refundReviewReason: "Provider terminal response did not include valid refundable quantities", refundStatus: "evidence_rejected" });
     if (refundDecision === "none") Object.assign(update, { refundReviewStatus: FieldValue.delete(), refundReviewFirstSeenAt: FieldValue.delete(), refundReviewConfirmations: FieldValue.delete(), refundReviewReason: FieldValue.delete() });
     if (startCount !== null) update.startCount = startCount;
     if (remains !== null) update.remains = remains;
+
     if (status !== previous) {
-      updated += 1;
-      await recordFinanceOrderStatus({
+      update.lastStatusChange = FieldValue.serverTimestamp();
+      const transition = await recordFinanceOrderStatus({
         orderId: doc.id,
-        previous: String(previous || "pending"),
-        next: String(status),
+        previous,
+        next: status,
         customerPriceMinor: Number(doc.get("customerPriceMinor") || 0),
         providerCostIncurredMinor: Number(doc.get("providerCostIncurredMinor") ?? doc.get("providerCostMinor") ?? 0),
         dateKey: String(doc.get("financeDateKey") || lagosDateKey(doc.get("createdAt")?.toDate?.() || new Date())),
         orderUpdate: update,
       });
-      await db.collection("orderEvents").add({ orderId: doc.id, userId: doc.get("userId"), status, previousStatus: previous, createdAt: FieldValue.serverTimestamp() });
-      await createCustomerNotification({ userId: doc.get("userId"), type: "order_status", title: `Order ${status.replaceAll("_", " ")}`, orderId: doc.id });
-      const routineEmailCount = Number(doc.get("customerRoutineEmailCount") || 0);
-      if (process.env.RESEND_API_KEY && process.env.EMAIL_FROM && shouldSendOrderStatusEmail(status, routineEmailCount)) {
-        const copy = orderStatusEmailCopy(status, doc.id.slice(0, 8));
-        await sendUserEmail(String(doc.get("userId")), { ...copy, buttonLabel: "View order", buttonUrl: `${process.env.NEXT_PUBLIC_APP_URL || "https://www.socialbooster.net.ng"}/dashboard/orders/${doc.id}` }).then(() => doc.ref.set({ ...(status === "completed" ? { customerRoutineEmailCount: FieldValue.increment(1) } : {}), lastCustomerEmailStatus: status, lastCustomerEmailAt: FieldValue.serverTimestamp() }, { merge: true })).catch((error) => console.warn("[order-email] delivery failed", { orderId: doc.id, error: error instanceof Error ? error.message : "Unknown error" }));
-      }
-      if (status === "completed") await recordCompletedOrderMarketing(doc.id).catch((error) => console.warn("[order-marketing-profile] completion update failed", { orderId: doc.id, error: error instanceof Error ? error.message : "Unknown error" }));
-    } else await doc.ref.set(update, { merge: true });
-    if (["stage", "reject"].includes(refundDecision)) await db.collection("auditLogs").add({ action: refundDecision === "stage" ? "order_refund_staged" : "order_refund_evidence_rejected", targetType: "order", targetId: doc.id, providerKey, providerOrderId: doc.get("providerOrderId"), candidateStatus, startCount, remains, quantity, createdAt: FieldValue.serverTimestamp() });
-    if (refundDecision === "confirm") {
-      const sellingRateMinor = integer(String(doc.get("sellingRateMinor") ?? "")) || 0;
-      const customerPriceMinor = integer(String(doc.get("customerPriceMinor") ?? "")) || 0;
-      const refundableQuantity = candidateStatus === "partial" ? BigInt(remains || 0) : BigInt(quantity);
-      const refund = Number(serviceCostMinor(BigInt(sellingRateMinor), refundableQuantity));
-      if (refund > 0 && customerPriceMinor > 0) {
-        const amount = Math.min(refund, customerPriceMinor);
-        const manualRefund = await db.collection("walletTransactions").doc(`admin-order-refund:${doc.id}`).get();
-        if (!manualRefund.exists) {
-          const result = await postWallet({ userId: doc.get("userId"), type: "refund", deltaMinor: amount, currency: String(doc.get("currency") || "NGN"), idempotencyKey: `status-refund:${doc.id}`, reference: doc.id, reason: `Order ${candidateStatus} after confirmed provider status` });
-          await doc.ref.set({ refundedAmountMinor: amount, refundedAt: FieldValue.serverTimestamp(), refundSource: "system_status_reconciliation" }, { merge: true });
-          await db.collection("auditLogs").add({ action: "order_refund_confirmed", targetType: "order", targetId: doc.id, providerKey, providerOrderId: doc.get("providerOrderId"), candidateStatus, amountMinor: amount, duplicate: result.duplicate, createdAt: FieldValue.serverTimestamp() });
-        } else {
-          await db.collection("auditLogs").add({ action: "order_refund_skipped_existing_admin_refund", targetType: "order", targetId: doc.id, candidateStatus, createdAt: FieldValue.serverTimestamp() });
+      if (!transition.duplicate) {
+        updated += 1;
+        await db.collection("orderEvents").add({ orderId: doc.id, userId: doc.get("userId"), status, previousStatus: previous, createdAt: FieldValue.serverTimestamp() });
+        await createCustomerNotification({ userId: doc.get("userId"), type: "order_status", title: `Order ${status.replaceAll("_", " ")}`, orderId: doc.id });
+        const routineEmailCount = Number(doc.get("customerRoutineEmailCount") || 0);
+        if (process.env.RESEND_API_KEY && process.env.EMAIL_FROM && shouldSendOrderStatusEmail(status, routineEmailCount)) {
+          const copy = orderStatusEmailCopy(status, doc.id.slice(0, 8));
+          await sendUserEmail(String(doc.get("userId")), { ...copy, buttonLabel: "View order", buttonUrl: `${process.env.NEXT_PUBLIC_APP_URL || "https://www.socialbooster.net.ng"}/dashboard/orders/${doc.id}` }).then(() => doc.ref.set({ ...(status === "completed" ? { customerRoutineEmailCount: FieldValue.increment(1) } : {}), lastCustomerEmailStatus: status, lastCustomerEmailAt: FieldValue.serverTimestamp() }, { merge: true })).catch((error) => console.warn("[order-email] delivery failed", { orderId: doc.id, error: error instanceof Error ? error.message : "Unknown error" }));
         }
+        if (status === "completed") await recordCompletedOrderMarketing(doc.id).catch((error) => console.warn("[order-marketing-profile] completion update failed", { orderId: doc.id, error: error instanceof Error ? error.message : "Unknown error" }));
+      }
+    } else {
+      await doc.ref.set(update, { merge: true });
+    }
+
+    if (["stage", "reject"].includes(refundDecision)) await db.collection("auditLogs").add({ action: refundDecision === "stage" ? "order_refund_staged" : "order_refund_evidence_rejected", targetType: "order", targetId: doc.id, providerKey, providerOrderId, candidateStatus, startCount, remains, quantity, createdAt: FieldValue.serverTimestamp() });
+    if (refundDecision === "confirm") {
+      const sellingRateMinor = nonNegativeInteger(doc.get("sellingRateMinor")) || 0;
+      const customerPriceMinor = nonNegativeInteger(doc.get("customerPriceMinor")) || 0;
+      const refundableQuantity = candidateStatus === "partial" ? remains || 0 : quantity;
+      const refundDue = Number(serviceCostMinor(BigInt(sellingRateMinor), BigInt(refundableQuantity)));
+      if (refundDue > 0 && customerPriceMinor > 0) {
+        const refundKeys = providerConfirmationRefundKeys(doc.id);
+        const refundDocuments = await db.getAll(...refundKeys.map((key) => db.collection("walletTransactions").doc(key)));
+        const existingRefunds = refundDocuments.filter((item) => item.exists);
+        const alreadyRefunded = existingRefunds.reduce((sum, item) => sum + Math.max(0, Number(item.get("deltaMinor") || 0)), 0);
+        const amount = Math.min(
+          remainingRefundAmount(refundDue, [alreadyRefunded]),
+          remainingRefundAmount(customerPriceMinor, [alreadyRefunded]),
+        );
+        const result = amount > 0
+          ? await postWallet({ userId: doc.get("userId"), type: "refund", deltaMinor: amount, currency: String(doc.get("currency") || "NGN"), idempotencyKey: `status-refund:${doc.id}`, reference: doc.id, reason: `Order ${candidateStatus} after confirmed provider status` })
+          : { transactionId: existingRefunds[0]?.id || `status-refund:${doc.id}`, duplicate: true };
+        const refundedAmountMinor = Math.min(customerPriceMinor, alreadyRefunded + amount);
+        await doc.ref.set({ refundableQuantity, refundAmountMinor: refundDue, refundedAmountMinor, refundedAt: FieldValue.serverTimestamp(), refundSource: amount > 0 ? "system_status_reconciliation" : "existing_verified_refund", refundStatus: "posted", refundTransactionId: result.transactionId, updatedAt: FieldValue.serverTimestamp() }, { merge: true });
+        await Promise.all([
+          db.collection("auditLogs").doc(`order-refund:${doc.id}`).set({ action: "order_refund_confirmed", targetType: "order", targetId: doc.id, providerKey, providerOrderId, candidateStatus, refundableQuantity, amountMinor: amount, refundDueMinor: refundDue, transactionId: result.transactionId, duplicate: result.duplicate, createdAt: FieldValue.serverTimestamp() }, { merge: true }),
+          db.collection("orderEvents").doc(`refund:${doc.id}`).set({ orderId: doc.id, userId: doc.get("userId"), status: "refund_posted", previousStatus: candidateStatus, amountMinor: refundedAmountMinor, transactionId: result.transactionId, createdAt: FieldValue.serverTimestamp() }, { merge: true }),
+        ]);
       }
     }
   }

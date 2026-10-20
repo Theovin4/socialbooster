@@ -15,6 +15,7 @@ import { createCustomerNotificationOnce } from "@/lib/customer-notifications";
 import { classifySubmissionError, safeSubmissionDiagnostics } from "@/lib/order-submission-outcome";
 import { providerAcceptsNewOrders, recordAmbiguousProviderSubmission } from "@/lib/provider-order-health";
 import { sendAdminAlert } from "@/lib/email";
+import { synchronizeOrderDocuments, type PrefetchedProviderStatuses } from "@/lib/order-sync";
 import {
   providerConfirmationClaimMatches,
   providerConfirmationRecoveryState,
@@ -133,7 +134,16 @@ async function refundAndCloseProviderConfirmation(input: { orderId: string; orde
 
 export async function refreshLiveOrders() {
   await requireAdmin();
+  const snapshot = await adminDb().collection("orders")
+    .where("status", "in", ["pending", "processing", "in_progress", "cancel_requested"])
+    .limit(100)
+    .get();
+  await synchronizeOrderDocuments(
+    snapshot.docs.filter((doc) => Number.isInteger(doc.get("providerOrderId"))),
+    true,
+  );
   revalidatePath("/admin/provider");
+  revalidatePath("/dashboard/orders");
 }
 
 export async function refundOrder(formData: FormData) {
@@ -177,7 +187,10 @@ export async function confirmProviderAccepted(formData: FormData) {
   if (!snapshot.exists) throw new Error("Order not found");
   const recovery = providerConfirmationRecoveryState(snapshot.data()!);
   if (!recovery.eligible) {
-    if (snapshot.get("providerConfirmationResolution") === "accepted" && Number(snapshot.get("providerOrderId")) === input.providerOrderId) redirect("/admin/provider?notice=provider-confirmed");
+    if (snapshot.get("providerConfirmationResolution") === "accepted" && Number(snapshot.get("providerOrderId")) === input.providerOrderId) {
+      await synchronizeOrderDocuments([snapshot], true);
+      redirect("/admin/provider?notice=provider-confirmed");
+    }
     throw new Error(recovery.reason);
   }
   const provider = getProvider(snapshot.get("providerKey"));
@@ -199,7 +212,11 @@ export async function confirmProviderAccepted(formData: FormData) {
     db.collection("orderEvents").doc(`provider-confirmation:${input.orderId}`).set({ orderId: input.orderId, userId: snapshot.get("userId"), status: "pending", previousStatus: "provider_confirmation_required", createdAt: FieldValue.serverTimestamp(), actorUid: admin.uid }, { merge: true }),
     createCustomerNotificationOnce({ userId: String(snapshot.get("userId")), type: "order_status", title: "Order confirmation completed", orderId: input.orderId }, `provider-confirmed:${input.orderId}`),
   ]);
+  const accepted = await ref.get();
+  const prefetched: PrefetchedProviderStatuses = new Map([[provider.key, { [String(input.providerOrderId)]: live }]]);
+  await synchronizeOrderDocuments([accepted], true, prefetched);
   revalidatePath("/admin/provider");
+  revalidatePath("/dashboard/orders");
   revalidatePath(`/dashboard/orders/${input.orderId}`);
   redirect("/admin/provider?notice=provider-confirmed");
 }
@@ -261,7 +278,10 @@ export async function retryProviderSubmissionOnce(formData: FormData) {
     db.collection("orderEvents").doc(`provider-confirmation-retry:${input.orderId}`).set({ orderId: input.orderId, userId: order.userId, status: "pending", previousStatus: "provider_confirmation_required", createdAt: FieldValue.serverTimestamp(), actorUid: admin.uid }, { merge: true }),
     createCustomerNotificationOnce({ userId: String(order.userId), type: "order_status", title: "Order confirmation completed", orderId: input.orderId }, `provider-retry-confirmed:${input.orderId}`),
   ]);
+  await synchronizeOrderDocuments([await ref.get()], true);
   revalidatePath("/admin/provider");
+  revalidatePath("/dashboard/orders");
+  revalidatePath(`/dashboard/orders/${input.orderId}`);
   redirect("/admin/provider?notice=provider-confirmed");
 }
 

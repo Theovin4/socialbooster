@@ -8,6 +8,7 @@ import { synchronizeOrderDocuments } from "@/lib/order-sync";
 import { customerOrderStatusLabel } from "@/lib/customer-order-status";
 import { decodeTimestampCursor, encodeTimestampCursor } from "@/lib/pagination-cursor";
 import { FieldPath, Timestamp } from "firebase-admin/firestore";
+import { orderProgress } from "@/lib/order-tracking";
 
 export const dynamic = "force-dynamic";
 const filters = [
@@ -19,6 +20,7 @@ const filters = [
   "partial",
   "cancelled",
   "failed",
+  "under_review",
 ];
 function date(value: { toDate?: () => Date } | undefined) {
   return (
@@ -38,16 +40,9 @@ function count(value: unknown) {
     ? parsed.toLocaleString("en-NG")
     : "Waiting";
 }
-function progress(quantity: unknown, remains: unknown, status: unknown) {
-  const total = Number(quantity);
-  if (remains === null || remains === undefined || remains === "")
-    return String(status) === "completed" ? 100 : 0;
-  const left = Number(remains);
-  if (String(status) === "completed") return 100;
-  if (!Number.isFinite(total) || total <= 0 || !Number.isFinite(left)) return 0;
-  return Math.max(0, Math.min(100, Math.round(((total - left) * 100) / total)));
+function serviceUpdate(value: { toDate?: () => Date } | undefined) {
+  return value?.toDate?.().toLocaleString("en-NG", { timeZone: "Africa/Lagos" }) || "Waiting for provider update";
 }
-
 export default async function OrdersPage({
   searchParams,
 }: {
@@ -55,16 +50,18 @@ export default async function OrdersPage({
 }) {
   const user = await requireUser();
   const { status = "all", q = "", refresh, after, submitted, attention, failed } = await searchParams;
+  const selectedStatus = status === "under_review" ? "provider_confirmation_required" : status;
   let refreshFailed = false;
   let query: FirebaseFirestore.Query = adminDb().collection("orders").where("userId", "==", user.uid);
-  if (filters.includes(status) && status !== "all") query = query.where("status", "==", status);
+  if (filters.includes(status) && status !== "all") query = query.where("status", "==", selectedStatus);
   query = query.orderBy("createdAt", "desc").orderBy(FieldPath.documentId(), "desc").limit(20);
   const cursor = decodeTimestampCursor(after);
   if (cursor) query = query.startAfter(Timestamp.fromMillis(cursor.millis), cursor.id);
-  const snapshot = await query.get();
+  let snapshot = await query.get();
   if (refresh === "1") {
     try {
       await synchronizeOrderDocuments(snapshot.docs.filter((doc) => Number.isInteger(doc.get("providerOrderId"))), true);
+      snapshot = await query.get();
     } catch (error) {
       refreshFailed = true;
       console.warn("[orders] customer status refresh failed", {
@@ -78,7 +75,7 @@ export default async function OrdersPage({
       const item = doc.data();
       const current = String(item.status || "pending").toLowerCase();
       return (
-        (status === "all" || current === status) &&
+        (status === "all" || current === selectedStatus) &&
         (!needle ||
           `${doc.id} ${item.serviceName} ${item.link}`
             .toLowerCase()
@@ -158,17 +155,14 @@ export default async function OrdersPage({
                   <th>Remaining</th>
                   <th>Charge</th>
                   <th>Status</th>
+                  <th>Last update</th>
                   <th></th>
                 </tr>
               </thead>
               <tbody>
                 {orders.map((doc) => {
                   const item = doc.data();
-                  const percent = progress(
-                    item.quantity,
-                    item.remains,
-                    item.status,
-                  );
+                  const tracking = orderProgress({ quantity: item.quantity, remains: item.remains, status: item.status });
                   return (
                     <tr key={doc.id}>
                       <td>#{doc.id.slice(0, 8)}</td>
@@ -177,9 +171,9 @@ export default async function OrdersPage({
                         {item.serviceName}
                         <div
                           className="progress-track"
-                          aria-label={`${percent}% delivered`}
+                          aria-label={tracking.percent === null ? "Waiting for provider update" : `${tracking.percent}% delivered`}
                         >
-                          <span style={{ width: `${percent}%` }} />
+                          <span style={{ width: `${tracking.percent || 0}%` }} />
                         </div>
                       </td>
                       <td>{count(item.startCount)}</td>
@@ -200,6 +194,7 @@ export default async function OrdersPage({
                           {customerOrderStatusLabel(item.status)}
                         </span>
                       </td>
+                      <td>{serviceUpdate(item.lastProviderUpdate)}</td>
                       <td>
                         <Link
                           className="btn"
@@ -217,11 +212,7 @@ export default async function OrdersPage({
           <div className="orders-mobile">
             {orders.map((doc) => {
               const item = doc.data();
-              const percent = progress(
-                item.quantity,
-                item.remains,
-                item.status,
-              );
+              const tracking = orderProgress({ quantity: item.quantity, remains: item.remains, status: item.status });
               return (
                 <article className="glass card" key={doc.id}>
                   <div className="section-head">
@@ -250,10 +241,11 @@ export default async function OrdersPage({
                   </div>
                   <div
                     className="progress-track"
-                    aria-label={`${percent}% delivered`}
+                    aria-label={tracking.percent === null ? "Waiting for provider update" : `${tracking.percent}% delivered`}
                   >
-                    <span style={{ width: `${percent}%` }} />
+                    <span style={{ width: `${tracking.percent || 0}%` }} />
                   </div>
+                  <p className="muted">Last service update: {serviceUpdate(item.lastProviderUpdate)}</p>
                   <div className="section-head" style={{ margin: "16px 0 0" }}>
                     <strong>
                       {formatMoney(

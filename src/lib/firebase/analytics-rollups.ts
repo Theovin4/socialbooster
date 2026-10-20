@@ -252,6 +252,7 @@ export async function recordFinanceProviderAccepted(input: {
       providerCostIncurredMinor: providerCostMinor,
       status: next,
       submittedAt: FieldValue.serverTimestamp(),
+      lastStatusChange: FieldValue.serverTimestamp(),
       updatedAt: FieldValue.serverTimestamp(),
       ...(input.confirmationRecovery ? {
         providerConfirmationResolution: "accepted",

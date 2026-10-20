@@ -8,11 +8,24 @@ import { FieldPath, Timestamp } from "firebase-admin/firestore";
 import { confirmProviderAccepted, confirmProviderRejected, refreshLiveOrders, refundOrder, retryCancellation, retryProviderSubmissionOnce, verifyProviderOrderHealth } from "./actions";
 import { providerReviewAgeBucket } from "@/lib/provider-review-policy";
 import { normalizeEmailText } from "@/lib/email";
+import { orderProgress } from "@/lib/order-tracking";
 
 export const dynamic = "force-dynamic";
 const PAGE_SIZE = 50;
-type LiveStatus = { status: string; start_count?: string; remains?: string };
 type PageCursor = { createdAt: number; id: string };
+const activeStatuses = ["pending", "processing", "in_progress", "cancel_requested"];
+const trackingFilters: Array<{ key: string; label: string; statuses?: string[] }> = [
+  { key: "all", label: "All" },
+  { key: "active", label: "Active", statuses: activeStatuses },
+  { key: "pending", label: "Pending", statuses: ["pending"] },
+  { key: "processing", label: "Processing", statuses: ["processing"] },
+  { key: "in_progress", label: "In progress", statuses: ["in_progress"] },
+  { key: "completed", label: "Completed", statuses: ["completed"] },
+  { key: "partial", label: "Partial", statuses: ["partial"] },
+  { key: "cancelled", label: "Cancelled", statuses: ["cancelled"] },
+  { key: "failed", label: "Failed", statuses: ["failed"] },
+  { key: "needs_confirmation", label: "Needs confirmation", statuses: ["provider_confirmation_required"] },
+];
 
 function encodeCursor(cursor: PageCursor) {
   return Buffer.from(JSON.stringify(cursor)).toString("base64url");
@@ -35,18 +48,27 @@ function cursorFor(document: FirebaseFirestore.QueryDocumentSnapshot) {
   return Number.isFinite(createdAt) ? encodeCursor({ createdAt, id: document.id }) : null;
 }
 
-export default async function ProviderHealthPage({ searchParams }: { searchParams: Promise<{ after?: string; before?: string; notice?: string }> }) {
+export default async function ProviderHealthPage({ searchParams }: { searchParams: Promise<{ after?: string; before?: string; notice?: string; status?: string }> }) {
   await requireAdmin();
   const input = await searchParams, after = decodeCursor(input.after), before = decodeCursor(input.before), db = adminDb();
-  let ordersQuery = db.collection("orders").orderBy("createdAt", "desc").orderBy(FieldPath.documentId(), "desc");
+  const selectedFilter = trackingFilters.find((item) => item.key === input.status) || trackingFilters[0];
+  let baseQuery: FirebaseFirestore.Query = db.collection("orders");
+  if (selectedFilter.statuses?.length === 1) baseQuery = baseQuery.where("status", "==", selectedFilter.statuses[0]);
+  if ((selectedFilter.statuses?.length || 0) > 1) baseQuery = baseQuery.where("status", "in", selectedFilter.statuses!);
+  let ordersQuery = baseQuery.orderBy("createdAt", "desc").orderBy(FieldPath.documentId(), "desc");
   if (after) ordersQuery = ordersQuery.startAfter(Timestamp.fromMillis(after.createdAt), after.id);
   if (before) ordersQuery = ordersQuery.endBefore(Timestamp.fromMillis(before.createdAt), before.id);
   const pagedOrdersQuery = before ? ordersQuery.limitToLast(PAGE_SIZE + 1) : ordersQuery.limit(PAGE_SIZE + 1);
-  const [orderSnapshot, countSnapshot, recoverySnapshot, recoveryCountSnapshot] = await Promise.all([
+  const [orderSnapshot, countSnapshot, recoverySnapshot, activeCount, completedCount, partialCount, failedCount, confirmationCount, refundReviewCount] = await Promise.all([
     pagedOrdersQuery.get(),
-    db.collection("orders").count().get(),
+    baseQuery.count().get(),
     db.collection("orders").where("status", "==", "provider_confirmation_required").orderBy("createdAt", "asc").limit(50).get(),
+    db.collection("orders").where("status", "in", activeStatuses).count().get(),
+    db.collection("orders").where("status", "==", "completed").count().get(),
+    db.collection("orders").where("status", "==", "partial").count().get(),
+    db.collection("orders").where("status", "==", "failed").count().get(),
     db.collection("orders").where("status", "==", "provider_confirmation_required").count().get(),
+    db.collection("orders").where("refundStatus", "==", "pending_confirmation").count().get(),
   ]);
   const hasExtra = orderSnapshot.size > PAGE_SIZE;
   const orders = before && hasExtra ? orderSnapshot.docs.slice(1) : orderSnapshot.docs.slice(0, PAGE_SIZE);
@@ -78,18 +100,14 @@ export default async function ProviderHealthPage({ searchParams }: { searchParam
       ambiguousCount: Number(orderHealth?.get("ambiguousCount") || 0),
     };
   }));
-  const statusGroups = new Map<string, number[]>();
-  for (const order of orders) {
-    const id = order.get("providerOrderId"); if (!Number.isInteger(id)) continue;
-    const key = normalizeProviderKey(order.get("providerKey")); statusGroups.set(key, [...(statusGroups.get(key) || []), id]);
-  }
-  const liveByProvider = new Map<string, Record<string, LiveStatus>>();
-  await Promise.all(Array.from(statusGroups.entries()).map(async ([key, ids]) => {
-    const provider = providers.find((item) => item.key === key); if (!provider?.configured) return;
-    const chunks = Array.from({ length: Math.ceil(ids.length / 100) }, (_, index) => ids.slice(index * 100, index * 100 + 100));
-    const results = await Promise.all(chunks.map((chunk) => provider.client.statuses(chunk).catch(() => ({}))));
-    liveByProvider.set(key, Object.assign({}, ...results));
-  }));
+  const summary = [
+    ["Active orders", activeCount.data().count],
+    ["Completed", completedCount.data().count],
+    ["Partial", partialCount.data().count],
+    ["Failed", failedCount.data().count],
+    ["Needs provider confirmation", confirmationCount.data().count],
+    ["Refund review", refundReviewCount.data().count],
+  ] as const;
 
   return <AppShell admin>
     <div className="section-head"><div><span className="eyebrow">Order infrastructure</span><h1 className="page-heading">Providers and live orders</h1><p className="muted page-lead">Monitor connections and delivery status across every configured provider.</p></div><form action={refreshLiveOrders}><button className="btn primary">Refresh live data</button></form></div>
@@ -97,9 +115,10 @@ export default async function ProviderHealthPage({ searchParams }: { searchParam
     {input.notice === "provider-rejected" ? <div className="notice" role="status" style={{ marginBottom: 18 }}><strong>Provider rejection resolved.</strong> The remaining verified charge was returned without resubmitting the order.</div> : null}
     {input.notice === "provider-review" ? <div className="notice" role="status" style={{ marginBottom: 18 }}><strong>The single retry remains under review.</strong> No further provider submission will be attempted.</div> : null}
     {input.notice === "provider-health-verified" ? <div className="notice" role="status" style={{ marginBottom: 18 }}><strong>Provider health verified.</strong> New orders may use this provider again.</div> : null}
+    <div className="grid3">{summary.map(([label, value]) => <article className="glass card stat-card" key={label}><span className="eyebrow">Tracking</span><strong className="stat-value">{value.toLocaleString("en-NG")}</strong><span className="muted">{label}</span></article>)}</div>
     <div className="grid3">{health.map((provider) => <article className="glass card stat-card" key={provider.key}><span className="eyebrow">{provider.label}</span><strong className="stat-value" style={{ fontSize: 28 }}>{provider.orderHealthStatus === "DEGRADED" ? "DEGRADED" : provider.connectedNow ? "Connected now" : provider.configured ? "Temporarily unreachable" : "Not configured"}</strong><span className="muted">Order safety: {provider.orderHealthStatus} · {provider.ambiguousCount} recent ambiguous submission(s)</span><span className="muted">Configuration: {provider.configured ? "configured" : "missing"}</span><span className="muted">{provider.balance ? `Live balance ${provider.balance.currency} ${provider.balance.balance}` : "Live balance unavailable"}</span><span className="muted">{provider.serviceCount === null ? "Synchronized service count unavailable" : `${provider.serviceCount.toLocaleString("en-NG")} synchronized`}{provider.publicServiceCount === null ? " · public eligible count unavailable" : ` · ${provider.publicServiceCount.toLocaleString("en-NG")} public eligible`}</span><span className="muted">Last successful sync: {provider.lastSuccessfulSync?.toLocaleString("en-NG", { timeZone: "Africa/Lagos" }) || "not recorded"}</span>{provider.orderHealthStatus === "DEGRADED" ? <form action={verifyProviderOrderHealth} style={{ display: "grid", gap: 8 }}><input type="hidden" name="providerKey" value={provider.key} /><label><input type="checkbox" name="confirmed" value="yes" required /> Run a read-only balance verification and reactivate only if successful.</label><button className="btn" type="submit">Verify provider health</button></form> : null}</article>)}</div>
     <section className="glass card" style={{ marginTop: 22 }}>
-      <div className="section-head"><div><span className="eyebrow">Duplicate-order protection</span><h2>Orders requiring provider confirmation</h2></div><span className="status-pill">{recoveryCountSnapshot.data().count} awaiting review</span></div>
+      <div className="section-head"><div><span className="eyebrow">Duplicate-order protection</span><h2>Orders requiring provider confirmation</h2></div><span className="status-pill">{confirmationCount.data().count} awaiting review</span></div>
       <p className="muted">Use the provider dashboard to locate the original submission. Attaching an order performs a read-only status check. The separate retry action calls the provider exactly once and is available only after an administrator confirms no upstream order exists.</p>
       {recoveryOrders.length ? <div className="card" style={{ marginBottom: 16 }}><strong>Read-only queue audit</strong><p className="muted" style={{ marginBottom: 0 }}>{Array.from(new Map(recoveryOrders.map((order) => [normalizeProviderKey(order.get("providerKey")), recoveryOrders.filter((item) => normalizeProviderKey(item.get("providerKey")) === normalizeProviderKey(order.get("providerKey")))]))).map(([key, items]) => `${providers.find((provider) => provider.key === key)?.label || key}: ${items.length} (${Object.entries(items.reduce<Record<string, number>>((counts, item) => { const created = item.get("createdAt")?.toMillis?.() || auditNowMs; const bucket = providerReviewAgeBucket(auditNowMs - created); counts[bucket] = (counts[bucket] || 0) + 1; return counts; }, {})).map(([bucket, count]) => `${bucket} ${count}`).join(", ")})`).join(" · ")}</p></div> : null}
       {recoveryOrders.length === 0 ? <p>No ambiguous submissions need review.</p> : <div style={{ display: "grid", gap: 16 }}>{recoveryOrders.map((order) => {
@@ -139,11 +158,13 @@ export default async function ProviderHealthPage({ searchParams }: { searchParam
       })}</div>}
       {recoverySnapshot.size === 50 ? <p className="muted" style={{ marginBottom: 0, marginTop: 14 }}>Showing the oldest 50 recovery items. Resolve these before loading more.</p> : null}
     </section>
-    <section className="glass data-table-wrap" style={{ marginTop: 22 }}><table className="data-table"><thead><tr><th>Order</th><th>Date</th><th>Provider</th><th>External ID</th><th>Service</th><th>Qty</th><th>Charge</th><th>Local status</th><th>Live status</th><th>Start</th><th>Remaining</th><th>Cancellation</th><th>Last update</th><th></th></tr></thead><tbody>{orders.map((item) => {
-      const providerKey = normalizeProviderKey(item.get("providerKey")), provider = providers.find((entry) => entry.key === providerKey)!, providerId = item.get("providerOrderId"), live = providerId ? liveByProvider.get(providerKey)?.[String(providerId)] : undefined, refunded = item.get("status") === "refunded", createdAt = item.get("createdAt")?.toDate?.(), lastUpdate = item.get("lastProviderUpdate")?.toDate?.();
+    <div className="order-filters" style={{ marginTop: 22 }}>{trackingFilters.map((filter) => <Link className={`btn${selectedFilter.key === filter.key ? " primary" : ""}`} href={`/admin/provider?status=${filter.key}`} key={filter.key}>{filter.label}</Link>)}</div>
+    <section className="glass data-table-wrap" style={{ marginTop: 22 }}><table className="data-table"><thead><tr><th>Order</th><th>Date</th><th>Provider</th><th>External ID</th><th>Service</th><th>Qty</th><th>Charge</th><th>Local status</th><th>Provider status</th><th>Start</th><th>Remaining</th><th>Progress</th><th>Refund</th><th>Cancellation</th><th>Last update</th><th></th></tr></thead><tbody>{orders.map((item) => {
+      const providerKey = normalizeProviderKey(item.get("providerKey")), provider = providers.find((entry) => entry.key === providerKey), providerId = item.get("providerOrderId"), refunded = item.get("status") === "refunded", createdAt = item.get("createdAt")?.toDate?.(), lastUpdate = item.get("lastProviderUpdate")?.toDate?.();
+      const progress = orderProgress({ quantity: item.get("quantity"), remains: item.get("remains"), status: item.get("status") });
       const needsConfirmation = item.get("status") === "provider_confirmation_required";
-      return <tr key={item.id}><td>#{item.id.slice(0, 8)}</td><td>{createdAt ? createdAt.toLocaleString("en-NG") : "—"}</td><td>{item.get("providerLabel") || provider.label}</td><td>{providerId || "Not submitted"}</td><td>{normalizeEmailText(item.get("serviceName"))}</td><td>{Number(item.get("quantity") || 0).toLocaleString("en-NG")}</td><td>{formatMoney(BigInt(item.get("customerPriceMinor") || 0), item.get("currency") || "NGN")}</td><td><span className="status-pill">{String(item.get("status") || "unknown").replaceAll("_", " ")}</span></td><td>{live?.status || item.get("providerStatus") || (providerId ? "Unavailable" : "—")}</td><td>{live?.start_count ?? item.get("startCount") ?? "—"}</td><td>{live?.remains ?? item.get("remains") ?? "—"}</td><td>{item.get("cancellationStatus") ? <><span className="status-pill">{String(item.get("cancellationStatus")).replaceAll("_", " ")}</span>{item.get("cancellationStatus") === "provider_confirmation_required" ? <form action={retryCancellation} style={{ marginTop: 8 }}><input type="hidden" name="orderId" value={item.id} /><button className="btn" type="submit">Retry</button></form> : null}</> : "—"}</td><td>{lastUpdate ? lastUpdate.toLocaleString("en-NG") : "—"}</td><td>{refunded ? <span className="status-pill">Refunded</span> : needsConfirmation ? <span className="status-pill">Use recovery queue</span> : <form action={refundOrder}><input type="hidden" name="orderId" value={item.id} /><button className="btn" type="submit">Refund</button></form>}</td></tr>;
+      return <tr key={item.id}><td>#{item.id.slice(0, 8)}</td><td>{createdAt ? createdAt.toLocaleString("en-NG", { timeZone: "Africa/Lagos" }) : "—"}</td><td>{item.get("providerLabel") || provider?.label || providerKey}</td><td>{providerId || "Not submitted"}</td><td>{normalizeEmailText(item.get("serviceName"))}</td><td>{Number(item.get("quantity") || 0).toLocaleString("en-NG")}</td><td>{formatMoney(BigInt(item.get("customerPriceMinor") || 0), item.get("currency") || "NGN")}</td><td><span className="status-pill">{String(item.get("status") || "unknown").replaceAll("_", " ")}</span></td><td>{item.get("providerStatus") || (providerId ? "Awaiting refresh" : "—")}</td><td>{item.get("startCount") ?? "—"}</td><td>{item.get("status") === "completed" ? 0 : item.get("remains") ?? "—"}</td><td>{progress.percent === null ? "Waiting" : `${progress.percent}%`}</td><td>{item.get("refundStatus") ? <span className="status-pill">{String(item.get("refundStatus")).replaceAll("_", " ")}</span> : "—"}</td><td>{item.get("cancellationStatus") ? <><span className="status-pill">{String(item.get("cancellationStatus")).replaceAll("_", " ")}</span>{item.get("cancellationStatus") === "provider_confirmation_required" ? <form action={retryCancellation} style={{ marginTop: 8 }}><input type="hidden" name="orderId" value={item.id} /><button className="btn" type="submit">Retry</button></form> : null}</> : "—"}</td><td>{lastUpdate ? lastUpdate.toLocaleString("en-NG", { timeZone: "Africa/Lagos" }) : "Never checked"}</td><td>{refunded ? <span className="status-pill">Refunded</span> : needsConfirmation ? <span className="status-pill">Use recovery queue</span> : <form action={refundOrder}><input type="hidden" name="orderId" value={item.id} /><button className="btn" type="submit">Refund</button></form>}</td></tr>;
     })}</tbody></table>{orders.length === 0 ? <div className="card"><p className="muted">No customer orders have been created yet.</p></div> : null}</section>
-    <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 12, marginTop: 18 }}><span className="muted">Showing {orders.length} of {total.toLocaleString("en-NG")} orders</span><div style={{ display: "flex", gap: 10 }}>{hasPrevious && previousCursor ? <Link className="btn" href={`/admin/provider?before=${encodeURIComponent(previousCursor)}`}>Previous</Link> : null}{hasNext && nextCursor ? <Link className="btn" href={`/admin/provider?after=${encodeURIComponent(nextCursor)}`}>Next</Link> : null}</div></div>
+    <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 12, marginTop: 18 }}><span className="muted">Showing {orders.length} of {total.toLocaleString("en-NG")} {selectedFilter.label.toLowerCase()} orders</span><div style={{ display: "flex", gap: 10 }}>{hasPrevious && previousCursor ? <Link className="btn" href={`/admin/provider?status=${selectedFilter.key}&before=${encodeURIComponent(previousCursor)}`}>Previous</Link> : null}{hasNext && nextCursor ? <Link className="btn" href={`/admin/provider?status=${selectedFilter.key}&after=${encodeURIComponent(nextCursor)}`}>Next</Link> : null}</div></div>
   </AppShell>;
 }
