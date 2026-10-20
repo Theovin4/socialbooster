@@ -302,3 +302,48 @@ Validation for this candidate:
 The engineering estimate is 15–100 MB/month at current low traffic after release, comfortably below the preferred 1 GiB/month budget and required 10 GiB/month ceiling. The candidate is **SAFE FOR SPARK NEXT MONTH**, subject to comparing at least seven normal post-release days with the Cloud Billing `Cloud Firestore Internet Data Transfer Out` SKU.
 
 Next steps should stay small: (1) review and release this candidate, (2) allow the next guarded provider synchronization to migrate snapshots to v3 without manually triggering a live sync for testing, (3) observe seven days of billing telemetry, then (4) consider a separately tested provider-text bound and object-storage plan only if measurements justify them. This pass is not deployed and has not triggered a provider sync, payment, order, refund, wallet mutation, or attachment migration.
+
+## Production baseline correction and final order-tracking accuracy pass — 20 October 2026
+
+The Firestore egress optimization is already released on GitHub `main` and production at `06faae72fc9d7b4148233ff1b88977cd883167a1`. The preceding section's pre-release sentence is historical and must not be used as current release state. The final order-tracking implementation commit is `6a0225e` and is layered directly on that production baseline.
+
+Architecture and verified progress:
+
+- `synchronizeOrderDocuments()` is the single authoritative persistence path for cron, administrator, customer-list, customer-detail and provider-confirmation recovery checks. It batches at most 100 IDs per provider request and retains the one-minute automatic stale interval.
+- A manually verified recovery still performs a read-only provider lookup, provider-scoped uniqueness enforcement and idempotent Finance acceptance. The verified response is then passed through the shared synchronizer immediately, without duplicating normalization rules or making a second provider request.
+- Completed status still requires numeric `start_count` and `remains === 0`. Unknown status strings remain conservatively active. Partial, failed and cancelled refunds retain the valid-evidence, two-observation and five-minute delay policy.
+- Delivery progress now has one shared calculation. Synchronization persists `startCount`, `remains`, `deliveredQuantity`, `progressPercent`, `lastProviderUpdate` and `lastStatusChange` where supported. Unknown remaining quantity is displayed as waiting rather than fabricated as 0%.
+- Confirmed terminal refunds persist refundable quantity, amount, source, transaction ID, timestamp and posted status. Existing refund sources reduce the remaining credit, total refunds cannot exceed the original charge, and the `status-refund:<order>` wallet key remains idempotent.
+- Order transition side effects run only when the Finance transaction confirms a real transition. Refund timeline events use a deterministic document ID, so repeated synchronization does not duplicate events.
+- Administrator “Refresh live data” now synchronizes and persists a bounded maximum of 100 active provider-backed orders. `/admin/provider` reads stored order truth instead of making transient status calls on every render, and exposes aggregate tracking cards plus bounded status filters.
+- Customer list refresh remains limited to the current 20-order page and re-reads that page after persistence. Customer detail remains an ownership-checked one-order refresh. Both customer views remain white-labelled and now expose trustworthy progress/freshness; posted partial refunds show a plain-language wallet-return message.
+- Growth Enablement, acquisition reporting, referral attribution, GA4 events, authentication, wallet/payment/provider submission behavior, immutable catalogue caching and the true 40% gross-margin formula were not changed.
+
+Bounded production read-only audit at `2026-10-20T16:43:02Z`:
+
+- Counts: completed 8, partial 0, pending 259, processing 0, in progress 2, needs confirmation 6, failed 7, refund review 0.
+- All six unresolved records remain Followpanel `provider_confirmation_required` orders with no provider order ID, start count or remains. They were not retried, refunded or modified.
+- Order IDs: `f744676b-eaa3-44c6-a686-1f535e6615e7`, `1cf40047-7038-4d64-bb4b-4d10d7267840`, `449a8ea3-fde2-4dd1-8687-a32a94dbd75f`, `72cc4003-632e-44e6-8484-30264de4fa4c`, `63e6bec9-ae23-4b2b-865d-85bd8b585cc6`, `1561546f-887a-42a9-8c9d-cfbe3816a9f7`.
+- Required next action for each is unchanged: an administrator must locate the exact Followpanel order and attach its verified provider order ID. Owner-reported outcomes are not sufficient evidence for an automatic state or wallet change.
+- Stored Finance reconciliation is `MATCH`, rollup version 2, last reconciled `2026-10-15T20:36:00.053Z`.
+
+Validation:
+
+| Gate | Result |
+| --- | --- |
+| Full test suite | Passed: 36 files / 188 tests |
+| Firebase Rules | Passed: isolated 3/3 tests |
+| TypeScript | Passed: `tsc --noEmit` |
+| ESLint | Passed with zero warnings |
+| Production build | Passed: compilation, TypeScript, page-data collection and all 88 generated pages |
+| Production dependency audit | Passed: zero vulnerabilities |
+| Tracked/source secret scan | Passed |
+| Finance / pricing / growth | Stored production reconciliation `MATCH`; Finance, 40% margin, acquisition, referral, lifecycle and Firebase-optimization regressions passed |
+| Live financial/provider testing | Not performed by design |
+
+Outstanding work in small phases:
+
+1. Release the documentation commit with implementation `6a0225e`, wait for the existing Vercel project to become READY, and perform only non-financial route/error smoke checks.
+2. Reconcile the six historical orders one at a time only after locating each exact Followpanel ID. A first partial observation must remain pending confirmation; wait at least five minutes before an intentional second check.
+3. Observe scheduled synchronization and Firestore billing for seven normal days. Do not manually trigger provider catalogue synchronization merely for testing.
+4. Add emulator-backed concurrent transition/refund coverage in a separate maintenance phase; do not broaden this release.
