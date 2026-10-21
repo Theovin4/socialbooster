@@ -5,7 +5,7 @@ import { isProviderKey, type ProviderKey } from "@/lib/providers";
 import { FieldPath } from "firebase-admin/firestore";
 import Link from "next/link";
 import { approveService, setServiceGovernance, setServicePriceOverride, syncAllServices } from "./actions";
-import { evaluateServiceQuality } from "@/lib/service-quality";
+import { evaluateServiceQuality, publicServiceDescription } from "@/lib/service-quality";
 import { publicServiceId } from "@/lib/service-public-id";
 
 export const dynamic = "force-dynamic";
@@ -35,6 +35,7 @@ async function loadServices(providerKey: ProviderKey, filters: AdminServiceFilte
     else if (["published", "hidden", "review"].includes(filters.filter || "")) query = query.where("publicStatus", "==", filters.filter);
     else if (filters.filter === "anomaly") query = query.where("priceStatus", "==", "PRICE_ANOMALY");
     else if (filters.filter === "compliance") query = query.where("flaggedForReview", "==", true);
+    else if (filters.filter === "semantic_loss") query = query.where("reasonCodes", "array-contains", "SEMANTIC_INFORMATION_LOSS");
     query = query.orderBy(FieldPath.documentId()).limit(50);
     const after = safeCursor(filters.after);
     if (after) query = query.startAfter(after);
@@ -77,7 +78,7 @@ export default async function AdminServices({ searchParams }: { searchParams: Pr
         </nav>
         <form className="glass card" style={{ marginTop: 18, display: "grid", gridTemplateColumns: "repeat(auto-fit,minmax(160px,1fr))", gap: 10 }}>
           <input type="hidden" name="provider" value={providerKey} />
-          <select className="field" name="filter" defaultValue={input.filter || ""}><option value="">All services</option><option value="active">Active</option><option value="inactive">Inactive</option><option value="published">Published</option><option value="hidden">Hidden</option><option value="review">Needs review</option><option value="anomaly">Price anomaly</option><option value="compliance">Compliance flag</option></select>
+          <select className="field" name="filter" defaultValue={input.filter || ""}><option value="">All services</option><option value="active">Active</option><option value="inactive">Inactive</option><option value="published">Published</option><option value="hidden">Hidden</option><option value="review">Needs review</option><option value="anomaly">Price anomaly</option><option value="compliance">Compliance flag</option><option value="semantic_loss">Semantic information loss</option></select>
           <input className="field" name="category" defaultValue={input.category || ""} placeholder="Exact category" />
           <button className="btn">Apply filters</button>
         </form>
@@ -88,13 +89,17 @@ export default async function AdminServices({ searchParams }: { searchParams: Pr
             const provider = doc.data;
             const local = result.approvedMap.get(doc.id);
             const active = local?.active === true;
-            const quality = evaluateServiceQuality({ name: String(provider.rawName || provider.name || ""), category: String(provider.rawCategoryName || provider.categoryName || ""), min: Number(provider.minQuantity), max: Number(provider.maxQuantity), rateMinor: BigInt(Number(provider.providerRateNgnMinor || provider.providerRateMinor || 0)), sellingRateMinor: BigInt(Number(provider.sellingRateMinor || 0)), providerFunded: true, type: String(provider.type || ""), refill: provider.refillSupported === true, cancel: provider.cancelSupported === true, active: provider.active === true, stale: provider.isActive === false });
+            const quality = evaluateServiceQuality({ name: String(provider.rawName || provider.name || ""), category: String(provider.rawCategoryName || provider.categoryName || ""), description: String(provider.rawDescription || provider.description || ""), min: Number(provider.minQuantity), max: Number(provider.maxQuantity), rateMinor: BigInt(Number(provider.providerRateNgnMinor || provider.providerRateMinor || 0)), sellingRateMinor: BigInt(Number(provider.sellingRateMinor || 0)), providerFunded: true, type: String(provider.type || ""), refill: provider.refillSupported === true, cancel: provider.cancelSupported === true, active: provider.active === true, stale: provider.isActive === false });
+            const publicDescription = publicServiceDescription({ name: quality.publicName, min: Number(provider.minQuantity), max: Number(provider.maxQuantity), refill: provider.refillSupported === true, cancel: provider.cancelSupported === true, semantics: quality.semantics });
             return (
               <article className="glass card" key={doc.id} style={{ display: "grid", gridTemplateColumns: "1fr auto", gap: 20, alignItems: "center" }}>
                 <div>
-                  <p className="eyebrow" style={{ margin: 0 }}>{provider.rawCategoryName || provider.categoryName}</p>
-                  <h2 style={{ fontSize: 18, margin: "8px 0" }}>{provider.name}</h2>
+                  <p className="eyebrow" style={{ margin: 0 }}>Raw category: {provider.rawCategoryName || provider.categoryName}</p>
+                  <h2 style={{ fontSize: 18, margin: "8px 0" }}>Raw name: {provider.rawName || provider.name}</h2>
+                  {provider.rawDescription || provider.description ? <p className="muted" style={{ margin: "0 0 8px" }}><strong>Raw description:</strong> {String(provider.rawDescription || provider.description).slice(0, 500)}</p> : null}
                   <p style={{ margin: "0 0 8px" }}><strong>Normalized public name:</strong> {String(local?.publicName || quality.publicName)}</p>
+                  <p className="muted" style={{ margin: "0 0 8px" }}><strong>Public variant:</strong> {quality.semantics.variant || "Standard"} · <strong>Target:</strong> {quality.semantics.target || "General"} · <strong>Region:</strong> {quality.semantics.region || "Not specified"}</p>
+                  <p className="muted" style={{ margin: "0 0 8px" }}><strong>Public description:</strong> {publicDescription}</p>
                   <p className="muted" style={{ margin: 0 }}>{provider.providerLabel || "Followpanel"} · Social Booster ID {publicServiceId(doc.id)} · Provider ID {provider.providerServiceId || doc.id} · Cost {provider.providerCurrency || "NGN"} {provider.rateText}/1,000 · Selling NGN {(Number(provider.sellingRateMinor || 0) / 100).toLocaleString("en-NG", { minimumFractionDigits: 2 })}/1,000 · Min {provider.minQuantity} · Max {provider.maxQuantity} · Refill {provider.refillSupported ? "Yes" : "No"} · Cancel {provider.cancelSupported ? "Yes" : "No"}</p>
                   {local ? <><p className="muted" style={{ margin: "8px 0 0" }}>Public: {active ? "Published" : "Hidden"} · Featured: {local.featured ? "Yes" : "No"} · Search index: {local.seoEligible ? "Approved" : "Noindex"} · Ads: {local.paidAdsEligible ? "Eligible" : "Not approved"} · Review flag: {local.flaggedForReview ? "Yes" : "No"}</p><p className="muted" style={{ margin: "8px 0 0" }}>Price check: {String(local.priceStatus || quality.priceStatus).replaceAll("_", " ")} · Compliance: {String(local.complianceStatus || quality.complianceStatus).replaceAll("_", " ")} · Public category: {quality.normalizedCategory} · Duplicate group: {String(local.duplicateGroupKey || quality.duplicateGroupKey).slice(0, 42)}</p>{quality.reasonCodes.length ? <small style={{ color: "#fbbf24" }}>Reason codes: {quality.reasonCodes.join(", ")}</small> : null}</> : null}
                 </div>

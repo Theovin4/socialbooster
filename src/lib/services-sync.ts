@@ -5,12 +5,12 @@ import { adminDb } from "./firebase/admin";
 import { configuredUsdToNgnRateMicros, convertMinor } from "./currency";
 import { DEFAULT_GROSS_MARGIN_BPS, decimalToMinor, grossMarginBps, markupBps, sellingPriceForGrossMarginMinor } from "./money";
 import { providerDefinitions, providerServiceDocumentId, type ProviderDefinition, type ProviderKey } from "./providers";
-import { choosePreferredDuplicateServices, evaluateServiceQuality, sanitizePublicCatalogCandidate } from "./service-quality";
+import { choosePreferredDuplicateServices, compactPublicServiceSemantics, evaluateServiceQuality, sanitizePublicCatalogCandidate, type PublicServiceSemantics } from "./service-quality";
 import { publicServiceId } from "./service-public-id";
 import { PUBLIC_CATALOG_SNAPSHOT_CHUNK_SIZE, PUBLIC_CATALOG_SNAPSHOT_VERSION, readPublicCatalogSnapshot, writePublicCatalogSnapshot, type PublicCatalogSnapshotItem } from "./public-catalog-snapshot";
 
 const FINGERPRINT_VERSION = 1;
-const QUALITY_RULESET_VERSION = 3;
+const QUALITY_RULESET_VERSION = 4;
 const FINGERPRINT_CHUNK_SIZE = 500;
 const MANUAL_SYNC_COOLDOWN_MS = 5 * 60 * 1000;
 const SYNC_LOCK_MS = 10 * 60 * 1000;
@@ -66,7 +66,7 @@ export async function refreshPublicCatalogManifest(successfulProviders?: number)
   const snapshots = await Promise.all(providers.map((provider) => readPublicCatalogSnapshot(provider.key)));
   const eligibleByProvider = snapshots.map((snapshot) => (snapshot?.items || [])
     .map(sanitizePublicCatalogCandidate)
-    .filter((item): item is PublicCatalogSnapshotItem => item !== null && item.active !== false));
+    .filter((item): item is PublicCatalogSnapshotItem & { semantics: PublicServiceSemantics } => item !== null && item.active !== false));
   const activePublicServices = choosePreferredDuplicateServices(eligibleByProvider.flat());
   const providerCounts = Object.fromEntries(providers.map((provider, index) => [provider.key, eligibleByProvider[index].length]));
   const providerSnapshotHashes = Object.fromEntries(providers.map((provider, index) => [provider.key, snapshots[index]?.hash || null]));
@@ -196,7 +196,7 @@ export async function synchronizeProviderServices(providerKey: ProviderDefinitio
     });
     const qualityById = new Map(normalized.map((row) => {
       const sellingRateMinor = sellingPriceForGrossMarginMinor(row.providerRateNgnMinor, grossMarginTargetBps);
-      return [row.id, evaluateServiceQuality({ name: row.item.name, category: row.item.category, min: row.item.min, max: row.item.max, rateMinor: row.providerRateNgnMinor, sellingRateMinor, providerFunded, type: row.item.type, refill: row.item.refill, cancel: row.item.cancel })] as const;
+      return [row.id, evaluateServiceQuality({ name: row.item.name, category: row.item.category, description: "description" in row.item ? row.item.description || "" : "", min: row.item.min, max: row.item.max, rateMinor: row.providerRateNgnMinor, sellingRateMinor, providerFunded, type: row.item.type, refill: row.item.refill, cancel: row.item.cancel })] as const;
     }));
     const duplicateCounts = new Map<string, number>();
     for (const quality of qualityById.values()) duplicateCounts.set(quality.duplicateGroupKey, (duplicateCounts.get(quality.duplicateGroupKey) || 0) + 1);
@@ -240,8 +240,8 @@ export async function synchronizeProviderServices(providerKey: ProviderDefinitio
       if (!quality.publicEligible) return null;
       const name = typeof stored?.publicNameOverride === "string" && stored.publicNameOverride.trim()
         ? stored.publicNameOverride.trim().slice(0, 140)
-        : publicSnapshotMigration && old?.name ? old.name : quality.publicName;
-      return { id: publicServiceId(row.id), internalId: row.id, name, category: quality.normalizedCategory, type: row.item.type, min: row.item.min, max: row.item.max, refill: row.item.refill, cancel: row.item.cancel, rateMinor: Number(sellingRateMinor), updatedAt: new Date().toISOString(), seoEligible: quality.publicEligible && (stored?.seoEligibilityOverride === "index" || old?.seoEligible === true), featured: quality.publicEligible && (stored?.featured === true || old?.featured === true), paidAdsEligible: quality.publicEligible && (stored?.paidAdsEligible === true || old?.paidAdsEligible === true), active };
+        : quality.publicName;
+      return { id: publicServiceId(row.id), internalId: row.id, name, category: quality.normalizedCategory, type: row.item.type, min: row.item.min, max: row.item.max, refill: row.item.refill, cancel: row.item.cancel, rateMinor: Number(sellingRateMinor), updatedAt: new Date().toISOString(), seoEligible: quality.publicEligible && (stored?.seoEligibilityOverride === "index" || old?.seoEligible === true), featured: quality.publicEligible && (stored?.featured === true || old?.featured === true), paidAdsEligible: quality.publicEligible && (stored?.paidAdsEligible === true || old?.paidAdsEligible === true), active, s: compactPublicServiceSemantics(quality.semantics) };
     };
 
     if (legacyBaseline || qualityMigration || publicSnapshotMigration) {
@@ -260,7 +260,7 @@ export async function synchronizeProviderServices(providerKey: ProviderDefinitio
         const visibilityOverride = stored?.visibilityOverride === "show" || stored?.visibilityOverride === "hide" ? stored.visibilityOverride : null;
         const active = quality.publicEligible && visibilityOverride !== "hide";
         const publicName = typeof stored?.publicNameOverride === "string" && stored.publicNameOverride.trim() ? stored.publicNameOverride.trim().slice(0, 140) : quality.publicName;
-        const customerData = { ...row.providerData, rawName: row.item.name, rawCategoryName: row.item.category, publicName, categoryName: quality.normalizedCategory, publicStatus: active ? "published" : quality.complianceStatus === "REVIEW_REQUIRED" || quality.priceStatus === "PRICE_REVIEW" ? "review" : "hidden", publicEligibility: quality.publicEligible ? "eligible" : "hidden", reasonCodes: quality.reasonCodes, hiddenReasons: quality.hiddenReasons, priceStatus: quality.priceStatus, complianceStatus: quality.complianceStatus, duplicateGroupKey: quality.duplicateGroupKey, featured: quality.publicEligible && stored?.featured === true, flaggedForReview: quality.complianceStatus === "REVIEW_REQUIRED" || quality.priceStatus === "PRICE_REVIEW" || stored?.flaggedForReview === true, paidAdsEligible: quality.publicEligible && stored?.paidAdsEligible === true, seoEligible: quality.publicEligible && stored?.seoEligibilityOverride === "index" };
+        const customerData = { ...row.providerData, rawName: row.item.name, rawCategoryName: row.item.category, rawDescription: "description" in row.item ? row.item.description || "" : "", publicName, publicSemantics: quality.semantics, categoryName: quality.normalizedCategory, publicStatus: active ? "published" : quality.complianceStatus === "REVIEW_REQUIRED" || quality.priceStatus === "PRICE_REVIEW" ? "review" : "hidden", publicEligibility: quality.publicEligible ? "eligible" : "hidden", reasonCodes: quality.reasonCodes, hiddenReasons: quality.hiddenReasons, priceStatus: quality.priceStatus, complianceStatus: quality.complianceStatus, duplicateGroupKey: quality.duplicateGroupKey, featured: quality.publicEligible && stored?.featured === true, flaggedForReview: quality.complianceStatus === "REVIEW_REQUIRED" || quality.priceStatus === "PRICE_REVIEW" || stored?.flaggedForReview === true, paidAdsEligible: quality.publicEligible && stored?.paidAdsEligible === true, seoEligible: quality.publicEligible && stored?.seoEligibilityOverride === "index" };
         const pricingFingerprint = hashRecord({ ...customerData, providerRateNgnMinor: String(row.providerRateNgnMinor), grossMarginTargetBps: Number(grossMarginTargetBps), active });
         writer.set(db.collection("providerServices").doc(id), { ...row.providerData, syncFingerprint: row.fingerprint, lastSyncedAt: FieldValue.serverTimestamp() }, { merge: true });
         writer.set(db.collection("services").doc(id), { ...customerData, providerNativeRateMinor: Number(row.nativeRateMinor), providerRateMinor: Number(row.providerRateNgnMinor), providerRateNgnMinor: Number(row.providerRateNgnMinor), sellingCurrency: "NGN", sellingRateMinor: Number(sellingRateMinor), pricingModel: "ngn_gross_margin_v2", pricingFingerprint, grossMarginTargetBps: Number(grossMarginTargetBps), grossMarginBps: Number(grossMarginBps(row.providerRateNgnMinor, sellingRateMinor)), markupBps: Number(markupBps(row.providerRateNgnMinor, sellingRateMinor)), active, autoImported: true, customSellingRateMinor: FieldValue.delete(), marginBps: FieldValue.delete(), updatedAt: FieldValue.serverTimestamp(), ...(stored ? {} : { createdAt: FieldValue.serverTimestamp() }) }, { merge: true });

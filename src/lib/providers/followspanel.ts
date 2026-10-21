@@ -41,6 +41,7 @@ const serviceSchema = z.preprocess((value) => {
     min: row.min ?? row.minimum ?? row.min_order ?? row.minOrder,
     max: row.max ?? row.maximum ?? row.max_order ?? row.maxOrder,
     category: row.category ?? row.category_name,
+    description: row.description ?? row.desc ?? row.details,
   };
 }, z.object({
   service: z.union([positiveInteger, z.string().trim().regex(/^[A-Za-z0-9][A-Za-z0-9_-]{2,127}$/)]),
@@ -50,6 +51,7 @@ const serviceSchema = z.preprocess((value) => {
   min: minimumInteger,
   max: positiveInteger,
   category: z.coerce.string().trim().min(1).optional().default("Other services"),
+  description: z.coerce.string().trim().max(5_000).optional().default(""),
   refill: booleanFlag,
   cancel: booleanFlag,
 }).refine((value) => value.max >= value.min, "Maximum must be greater than or equal to minimum"));

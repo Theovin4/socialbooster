@@ -3,10 +3,11 @@ import { createHash } from "node:crypto";
 import { FieldValue } from "firebase-admin/firestore";
 import { adminDb } from "./firebase/admin";
 import type { ProviderKey } from "./providers";
+import type { CompactPublicServiceSemantics } from "./service-quality";
 
-export const PUBLIC_CATALOG_SNAPSHOT_VERSION = 3;
+export const PUBLIC_CATALOG_SNAPSHOT_VERSION = 4;
 export const PUBLIC_CATALOG_SNAPSHOT_CHUNK_SIZE = 200;
-export type PublicCatalogSnapshotVersion = 1 | 2 | 3;
+export type PublicCatalogSnapshotVersion = 1 | 2 | 3 | 4;
 
 export type PublicCatalogSnapshotItem = {
   id: string;
@@ -24,15 +25,16 @@ export type PublicCatalogSnapshotItem = {
   featured: boolean;
   paidAdsEligible: boolean;
   active: boolean;
+  s?: CompactPublicServiceSemantics;
 };
 
 export type SnapshotSlot = "a" | "b";
-export type SlotMetadata = { chunkCount: number; hash: string; serviceCount: number };
+export type SlotMetadata = { chunkCount: number; hash: string; serviceCount: number; version?: PublicCatalogSnapshotVersion };
 type SnapshotRead = { items: PublicCatalogSnapshotItem[]; hash: string | null; slot: SnapshotSlot | "legacy"; fallbackUsed: boolean };
 export type PublicCatalogSnapshotDescriptor = {
   version: PublicCatalogSnapshotVersion;
-  active: { slot: SnapshotSlot | "legacy"; chunkCount: number; serviceCount: number | null; hash: string | null };
-  previous: { slot: SnapshotSlot; chunkCount: number; serviceCount: number; hash: string } | null;
+  active: { slot: SnapshotSlot | "legacy"; chunkCount: number; serviceCount: number | null; hash: string | null; version: PublicCatalogSnapshotVersion };
+  previous: { slot: SnapshotSlot; chunkCount: number; serviceCount: number; hash: string; version: PublicCatalogSnapshotVersion } | null;
 };
 
 export function compactPublicCatalogItem(item: PublicCatalogSnapshotItem): PublicCatalogSnapshotItem {
@@ -41,11 +43,12 @@ export function compactPublicCatalogItem(item: PublicCatalogSnapshotItem): Publi
     min: item.min, max: item.max, refill: item.refill, cancel: item.cancel, rateMinor: item.rateMinor,
     updatedAt: item.updatedAt, seoEligible: item.seoEligible, featured: item.featured,
     paidAdsEligible: item.paidAdsEligible, active: item.active,
+    ...(item.s ? { s: item.s } : {}),
   };
 }
 
 function stableItem(item: PublicCatalogSnapshotItem) {
-  return { id: item.id, internalId: item.internalId, name: item.name, category: item.category, type: item.type, min: item.min, max: item.max, refill: item.refill, cancel: item.cancel, rateMinor: item.rateMinor, seoEligible: item.seoEligible, featured: item.featured, paidAdsEligible: item.paidAdsEligible, active: item.active };
+  return { id: item.id, internalId: item.internalId, name: item.name, category: item.category, type: item.type, min: item.min, max: item.max, refill: item.refill, cancel: item.cancel, rateMinor: item.rateMinor, seoEligible: item.seoEligible, featured: item.featured, paidAdsEligible: item.paidAdsEligible, active: item.active, ...(item.s ? { s: item.s } : {}) };
 }
 
 export function publicCatalogHash(items: PublicCatalogSnapshotItem[]) {
@@ -67,15 +70,16 @@ export function shouldPublishPublicSnapshot(previousHash: unknown, nextHash: str
   return previousHash !== nextHash;
 }
 
-function slotMetadata(value: unknown): SlotMetadata | null {
+function slotMetadata(value: unknown, fallbackVersion?: PublicCatalogSnapshotVersion): SlotMetadata | null {
   if (!value || typeof value !== "object" || Array.isArray(value)) return null;
   const record = value as Record<string, unknown>;
   const chunkCount = Number(record.chunkCount), serviceCount = Number(record.serviceCount), hash = String(record.hash || "");
   if (!Number.isSafeInteger(chunkCount) || chunkCount < 0 || !Number.isSafeInteger(serviceCount) || serviceCount < 0 || !/^[a-f0-9]{64}$/.test(hash)) return null;
-  return { chunkCount, serviceCount, hash };
+  const version = Number(record.version ?? fallbackVersion);
+  return { chunkCount, serviceCount, hash, ...(version >= 1 && version <= PUBLIC_CATALOG_SNAPSHOT_VERSION ? { version: version as PublicCatalogSnapshotVersion } : {}) };
 }
 
-async function readSlot(provider: ProviderKey, slot: SnapshotSlot, metadata: SlotMetadata, version: 2 | 3 = PUBLIC_CATALOG_SNAPSHOT_VERSION): Promise<PublicCatalogSnapshotItem[] | null> {
+async function readSlot(provider: ProviderKey, slot: SnapshotSlot, metadata: SlotMetadata, version: 2 | 3 | 4 = PUBLIC_CATALOG_SNAPSHOT_VERSION): Promise<PublicCatalogSnapshotItem[] | null> {
   const db = adminDb();
   const refs = Array.from({ length: metadata.chunkCount }, (_, index) => db.collection("publicCatalogChunks").doc(`${provider}_${slot}_${String(index).padStart(4, "0")}`));
   const chunks = refs.length ? await db.getAll(...refs) : [];
@@ -102,21 +106,21 @@ async function recordFallback(provider: ProviderKey, reason: string, recovered: 
 export async function readPublicCatalogSnapshotDescriptor(provider: ProviderKey): Promise<PublicCatalogSnapshotDescriptor | null> {
   const manifest = await adminDb().collection("publicCatalogManifests").doc(provider).get();
   if (!manifest.exists) { await recordFallback(provider, "manifest_missing", false); return null; }
-  if (manifest.get("version") === 2 || manifest.get("version") === PUBLIC_CATALOG_SNAPSHOT_VERSION) {
-    const version = manifest.get("version") as 2 | 3;
+  if ([2, 3, PUBLIC_CATALOG_SNAPSHOT_VERSION].includes(Number(manifest.get("version")))) {
+    const version = manifest.get("version") as 2 | 3 | 4;
     const activeSlot: SnapshotSlot = manifest.get("activeSlot") === "b" ? "b" : "a";
     const previousSlot: SnapshotSlot | null = manifest.get("previousSlot") === "b" ? "b" : manifest.get("previousSlot") === "a" ? "a" : null;
     const slots = (manifest.get("slots") || {}) as Record<string, unknown>;
-    const active = slotMetadata(slots[activeSlot]);
-    const previous = previousSlot ? slotMetadata(slots[previousSlot]) : null;
+    const active = slotMetadata(slots[activeSlot], version);
+    const previous = previousSlot ? slotMetadata(slots[previousSlot], version) : null;
     if (!active) { await recordFallback(provider, "active_snapshot_manifest_invalid", Boolean(previous)); }
     return active ? {
       version,
-      active: { slot: activeSlot, ...active },
-      previous: previousSlot && previous ? { slot: previousSlot, ...previous } : null,
+      active: { slot: activeSlot, ...active, version: active.version || version },
+      previous: previousSlot && previous ? { slot: previousSlot, ...previous, version: previous.version || version } : null,
     } : previousSlot && previous ? {
       version,
-      active: { slot: previousSlot, ...previous },
+      active: { slot: previousSlot, ...previous, version: previous.version || version },
       previous: null,
     } : null;
   }
@@ -126,7 +130,7 @@ export async function readPublicCatalogSnapshotDescriptor(provider: ProviderKey)
     const serviceCountValue = Number(manifest.get("serviceCount"));
     return {
       version: 1,
-      active: { slot: "legacy", chunkCount, serviceCount: Number.isSafeInteger(serviceCountValue) && serviceCountValue >= 0 ? serviceCountValue : null, hash: null },
+      active: { slot: "legacy", chunkCount, serviceCount: Number.isSafeInteger(serviceCountValue) && serviceCountValue >= 0 ? serviceCountValue : null, hash: null, version: 1 },
       previous: null,
     };
   }
@@ -160,20 +164,20 @@ export async function recordPublicCatalogSnapshotFallback(provider: ProviderKey,
 export async function readPublicCatalogSnapshot(provider: ProviderKey): Promise<SnapshotRead | null> {
   const db = adminDb(), manifest = await db.collection("publicCatalogManifests").doc(provider).get();
   if (!manifest.exists) { await recordFallback(provider, "manifest_missing", false); return null; }
-  if (manifest.get("version") === 2 || manifest.get("version") === PUBLIC_CATALOG_SNAPSHOT_VERSION) {
-    const version = manifest.get("version") as 2 | 3;
+  if ([2, 3, PUBLIC_CATALOG_SNAPSHOT_VERSION].includes(Number(manifest.get("version")))) {
+    const version = manifest.get("version") as 2 | 3 | 4;
     const activeSlot: SnapshotSlot = manifest.get("activeSlot") === "b" ? "b" : "a";
     const previousSlot: SnapshotSlot | null = manifest.get("previousSlot") === "b" ? "b" : manifest.get("previousSlot") === "a" ? "a" : null;
     const slots = (manifest.get("slots") || {}) as Record<string, unknown>;
-    const activeMetadata = slotMetadata(slots[activeSlot]);
+    const activeMetadata = slotMetadata(slots[activeSlot], version);
     if (activeMetadata) {
-      const activeItems = await readSlot(provider, activeSlot, activeMetadata, version);
+      const activeItems = await readSlot(provider, activeSlot, activeMetadata, (activeMetadata.version || version) as 2 | 3 | 4);
       if (activeItems) return { items: activeItems, hash: activeMetadata.hash, slot: activeSlot, fallbackUsed: false };
     }
     if (previousSlot) {
-      const previousMetadata = slotMetadata(slots[previousSlot]);
+      const previousMetadata = slotMetadata(slots[previousSlot], version);
       if (previousMetadata) {
-        const previousItems = await readSlot(provider, previousSlot, previousMetadata, version);
+        const previousItems = await readSlot(provider, previousSlot, previousMetadata, (previousMetadata.version || version) as 2 | 3 | 4);
         if (previousItems) { await recordFallback(provider, "active_snapshot_invalid", true); return { items: previousItems, hash: previousMetadata.hash, slot: previousSlot, fallbackUsed: true }; }
       }
     }
@@ -199,7 +203,8 @@ export async function writePublicCatalogSnapshot(provider: ProviderKey, items: P
   const nextHash = publicCatalogHash(compactItems);
   if (previous.get("version") === PUBLIC_CATALOG_SNAPSHOT_VERSION && !shouldPublishPublicSnapshot(previous.get("activeHash"), nextHash)) return { changed: false, chunkCount: Number(previous.get("chunkCount") || 0), serviceCount: compactItems.length, hash: nextHash };
   const currentSlot: SnapshotSlot = previous.get("activeSlot") === "b" ? "b" : "a";
-  const hasSlottedSnapshot = previous.get("version") === 2 || previous.get("version") === PUBLIC_CATALOG_SNAPSHOT_VERSION;
+  const previousVersion = Number(previous.get("version"));
+  const hasSlottedSnapshot = [2, 3, PUBLIC_CATALOG_SNAPSHOT_VERSION].includes(previousVersion);
   const nextSlot: SnapshotSlot = hasSlottedSnapshot ? (currentSlot === "a" ? "b" : "a") : "a";
   const chunkCount = Math.ceil(compactItems.length / PUBLIC_CATALOG_SNAPSHOT_CHUNK_SIZE);
   const writer = db.bulkWriter(); writer.onWriteError((error) => error.failedAttempts < 3);
@@ -208,9 +213,14 @@ export async function writePublicCatalogSnapshot(provider: ProviderKey, items: P
     writer.set(db.collection("publicCatalogChunks").doc(`${provider}_${nextSlot}_${String(index).padStart(4, "0")}`), { provider, slot: nextSlot, version: PUBLIC_CATALOG_SNAPSHOT_VERSION, snapshotHash: nextHash, items: chunk, updatedAt: FieldValue.serverTimestamp() });
   }
   await writer.close();
-  const existingSlots = previous.get("version") === PUBLIC_CATALOG_SNAPSHOT_VERSION ? ((previous.get("slots") || {}) as Record<string, unknown>) : {};
-  const slots = { ...existingSlots, [nextSlot]: { chunkCount, serviceCount: compactItems.length, hash: nextHash } };
-  await manifestRef.set({ provider, version: PUBLIC_CATALOG_SNAPSHOT_VERSION, activeSlot: nextSlot, previousSlot: previous.get("version") === PUBLIC_CATALOG_SNAPSHOT_VERSION ? currentSlot : null, activeHash: nextHash, chunkCount, serviceCount: compactItems.length, slots, updatedAt: FieldValue.serverTimestamp() });
+  const existingSlots = hasSlottedSnapshot ? ((previous.get("slots") || {}) as Record<string, unknown>) : {};
+  const currentMetadata = hasSlottedSnapshot ? slotMetadata(existingSlots[currentSlot], previousVersion as PublicCatalogSnapshotVersion) : null;
+  const slots = {
+    ...existingSlots,
+    ...(currentMetadata ? { [currentSlot]: { ...currentMetadata, version: currentMetadata.version || previousVersion } } : {}),
+    [nextSlot]: { chunkCount, serviceCount: compactItems.length, hash: nextHash, version: PUBLIC_CATALOG_SNAPSHOT_VERSION },
+  };
+  await manifestRef.set({ provider, version: PUBLIC_CATALOG_SNAPSHOT_VERSION, activeSlot: nextSlot, previousSlot: currentMetadata ? currentSlot : null, activeHash: nextHash, chunkCount, serviceCount: compactItems.length, slots, updatedAt: FieldValue.serverTimestamp() });
   return { changed: true, chunkCount, serviceCount: compactItems.length, hash: nextHash };
 }
 

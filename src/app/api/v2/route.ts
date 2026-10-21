@@ -24,7 +24,7 @@ export async function POST(request: Request) {
     const db = adminDb();
     if (action === "services") {
       const services = await getActiveServiceCatalog();
-      return Response.json(services.map((service) => ({ service: service.id, name: service.name, type: service.type, category: service.category, rate: amount(service.rateMinor), min: service.min, max: service.max, refill: service.refill, cancel: service.cancel, currency: "NGN" })));
+      return Response.json(services.map((service) => ({ service: service.id, name: service.name, type: service.type, category: service.category, description: service.description, variant: service.semantics.variant || null, target: service.semantics.target || null, region: service.semantics.region || null, scope: service.semantics.scope || null, reaction_type: service.semantics.reactionEmojis?.join(" ") || service.semantics.reactionPolarity || null, required_link: service.semantics.linkType, rate: amount(service.rateMinor), min: service.min, max: service.max, refill: service.refill, cancel: service.cancel, currency: "NGN" })));
     }
     if (action === "balance") {
       const wallet = await db.collection("wallets").doc(auth.userId).get();

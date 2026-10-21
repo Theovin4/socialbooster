@@ -10,7 +10,7 @@ import {
   type PublicCatalogSnapshotItem,
   type PublicCatalogSnapshotVersion,
 } from "./public-catalog-snapshot";
-import { choosePreferredDuplicateServices, rankFeaturedServices, sanitizePublicCatalogCandidate } from "./service-quality";
+import { choosePreferredDuplicateServices, expandPublicServiceSemantics, matchesServiceSearch, publicServiceDescription, rankFeaturedServices, sanitizePublicCatalogCandidate, type PublicServiceSemantics } from "./service-quality";
 
 export { publicServiceId } from "./service-public-id";
 
@@ -32,6 +32,7 @@ export type CachedService = {
   seoEligible: boolean;
   featured: boolean;
   paidAdsEligible: boolean;
+  semantics: PublicServiceSemantics;
 };
 
 export type ServiceCatalogPage = {
@@ -45,7 +46,7 @@ export type ServiceCatalogPage = {
 
 const getCachedSnapshotDescriptor = unstable_cache(
   async (provider: ProviderKey) => readPublicCatalogSnapshotDescriptor(provider),
-  ["active-service-catalog-descriptor-v1"],
+  ["active-service-catalog-descriptor-v2"],
   { tags: [SERVICE_CATALOG_TAG] },
 );
 
@@ -57,24 +58,25 @@ const getCachedSnapshotChunk = unstable_cache(
 
 type DescriptorSlot = PublicCatalogSnapshotDescriptor["active"];
 
-async function loadDescriptorSlot(provider: ProviderKey, version: PublicCatalogSnapshotVersion, slot: DescriptorSlot): Promise<PublicCatalogSnapshotItem[] | null> {
+async function loadDescriptorSlot(provider: ProviderKey, slot: DescriptorSlot): Promise<PublicCatalogSnapshotItem[] | null> {
+  const version = slot.version;
   const chunks = await Promise.all(Array.from({ length: slot.chunkCount }, (_, index) =>
     getCachedSnapshotChunk(provider, version, slot.slot, index, slot.hash || ""),
   ));
   if (chunks.some((chunk) => !chunk)) return null;
   const items = chunks.flatMap((chunk) => chunk || []);
   if (slot.serviceCount !== null && items.length !== slot.serviceCount) return null;
-  if (version === 3 && slot.hash && publicCatalogHash(items) !== slot.hash) return null;
+  if (version >= 3 && slot.hash && publicCatalogHash(items) !== slot.hash) return null;
   return items;
 }
 
 async function loadProviderCatalog(provider: ProviderKey): Promise<PublicCatalogSnapshotItem[]> {
   const descriptor = await getCachedSnapshotDescriptor(provider);
   if (!descriptor) return [];
-  const active = await loadDescriptorSlot(provider, descriptor.version, descriptor.active);
+  const active = await loadDescriptorSlot(provider, descriptor.active);
   if (active) return active;
   if (descriptor.previous) {
-    const previous = await loadDescriptorSlot(provider, descriptor.version, descriptor.previous);
+    const previous = await loadDescriptorSlot(provider, descriptor.previous);
     if (previous) {
       await recordPublicCatalogSnapshotFallback(provider, true);
       return previous;
@@ -95,19 +97,18 @@ export async function getActiveServiceCatalog(): Promise<CachedService[]> {
   return choosePreferredDuplicateServices(snapshots
     .flat()
     .map(sanitizePublicCatalogCandidate)
-    .filter((item): item is PublicCatalogSnapshotItem => item !== null)
-    .map((item) => ({ ...item, description: publicServiceDescription(item.name, item.category), updatedAt: item.updatedAt || null })))
+    .filter((item): item is PublicCatalogSnapshotItem & { semantics: PublicServiceSemantics } => item !== null)
+    .map((item) => {
+      const semantics = item.s ? expandPublicServiceSemantics(item.s) : item.semantics;
+      return { ...item, semantics, description: publicServiceDescription({ ...item, semantics }), updatedAt: item.updatedAt || null };
+    }))
     .sort((a, b) => a.category.localeCompare(b.category) || a.name.localeCompare(b.name));
-}
-
-export function publicServiceDescription(name: string, category: string) {
-  return `${name} is listed under ${category}. Review the quantity range, use the correct public profile or content link, and confirm the order details before submitting.`;
 }
 
 /** Curates platform examples from the eligible cached catalogue, not provider row order. */
 export async function getFeaturedServices(query: string, limit = 6) {
   const normalized = query.trim().toLocaleLowerCase("en");
-  const matches = (await getActiveServiceCatalog()).filter((service) => `${service.name} ${service.category}`.toLocaleLowerCase("en").includes(normalized));
+  const matches = (await getActiveServiceCatalog()).filter((service) => matchesServiceSearch(service, normalized));
   return rankFeaturedServices(matches).slice(0, Math.max(1, Math.min(20, Math.floor(limit))));
 }
 
@@ -130,7 +131,7 @@ async function buildServiceCatalogPage(input: ServiceCatalogPageInput): Promise<
   const category = (input.category || "").trim();
   const filtered = catalog.filter((item) =>
     (!category || item.category === category) &&
-    (!query || `${item.id} ${item.name} ${item.category}`.toLocaleLowerCase("en").includes(query)),
+    (!query || matchesServiceSearch(item, query)),
   );
   const pageSize = Math.max(10, Math.min(100, Math.floor(input.pageSize || 50)));
   const total = filtered.length;
@@ -145,7 +146,7 @@ async function buildServiceCatalogPage(input: ServiceCatalogPageInput): Promise<
 const getCachedServiceCatalogPage = unstable_cache(
   async (query: string, category: string, page: number, pageSize: number, selectedId: string) =>
     buildServiceCatalogPage({ query, category, page, pageSize, selectedId }),
-  ["active-service-catalog-v9-page"],
+  ["active-service-catalog-v10-page"],
   { tags: [SERVICE_CATALOG_TAG] },
 );
 

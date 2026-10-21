@@ -12,7 +12,7 @@ export default async function NewOrderPage({ searchParams }: { searchParams: Pro
   const selectedService = input.service ? await resolveServiceIdentifier(input.service) : null;
   const requestedServiceId = selectedService?.id || input.service;
   const catalog = await getServiceCatalogPage({ query: input.q, category: input.category, page: input.page ? requestedPage : undefined, pageSize: 50, selectedId: requestedServiceId });
-  const services: OrderService[] = catalog.items.map((item) => ({ id: item.id, name: item.name, category: item.category, min: item.min, max: item.max, rateMinor: item.rateMinor, refill: item.refill, cancel: item.cancel, description: item.description }));
+  const services: OrderService[] = catalog.items.map((item) => ({ id: item.id, name: item.name, category: item.category, min: item.min, max: item.max, rateMinor: item.rateMinor, refill: item.refill, cancel: item.cancel, description: item.description, semantics: item.semantics }));
   const selectedId = services.some((item) => item.id === requestedServiceId) ? requestedServiceId : undefined;
   const pageHref = (page: number) => {
     const params = new URLSearchParams();

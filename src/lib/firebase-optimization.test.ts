@@ -1,4 +1,5 @@
 import { readFileSync } from "node:fs";
+import { createHash } from "node:crypto";
 import { describe, expect, it } from "vitest";
 import { compactPublicCatalogItem, publicCatalogHash, shouldPublishPublicSnapshot, type PublicCatalogSnapshotItem } from "./public-catalog-snapshot";
 
@@ -6,6 +7,7 @@ const item: PublicCatalogSnapshotItem = {
   id: "service_public_1", internalId: "followspanel_1", name: "Service", category: "Instagram", type: "Default",
   min: 10, max: 10_000, refill: true, cancel: false, rateMinor: 1_400,
   updatedAt: "2026-01-01T00:00:00.000Z", seoEligible: true, featured: false, paidAdsEligible: false, active: true,
+  s: { p: "Instagram", k: "Followers", t: "Profile" },
 };
 
 describe("Firebase optimization architecture", () => {
@@ -13,6 +15,13 @@ describe("Firebase optimization architecture", () => {
     const hash = publicCatalogHash([item]);
     expect(shouldPublishPublicSnapshot(hash, publicCatalogHash([{ ...item, updatedAt: "2026-10-01T00:00:00.000Z" }]))).toBe(false);
     expect(shouldPublishPublicSnapshot(hash, publicCatalogHash([{ ...item, rateMinor: 1_500 }]))).toBe(true);
+  });
+
+  it("keeps the v3 hash shape compatible while hashing v4 semantics", () => {
+    const { s: _semantics, updatedAt: _updatedAt, ...legacy } = item;
+    const expectedV3 = createHash("sha256").update(JSON.stringify([legacy])).digest("hex");
+    expect(publicCatalogHash([{ ...item, s: undefined }])).toBe(expectedV3);
+    expect(publicCatalogHash([item])).not.toBe(expectedV3);
   });
 
   it("keeps immutable catalogue chunks cached by snapshot hash without time expiry or broad invalidation", () => {
@@ -61,7 +70,7 @@ describe("Firebase optimization architecture", () => {
 
   it("forces a bounded snapshot rebuild when catalogue quality rules change", () => {
     const sync = readFileSync(new URL("./services-sync.ts", import.meta.url), "utf8");
-    expect(sync).toContain("QUALITY_RULESET_VERSION = 3");
+    expect(sync).toContain("QUALITY_RULESET_VERSION = 4");
     expect(sync).toContain("qualityMigration");
     expect(sync).not.toContain("if (!quality.publicEligible && !old) return null");
   });

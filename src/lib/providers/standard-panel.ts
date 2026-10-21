@@ -16,7 +16,7 @@ const serviceSchema = z.object({
   min: z.coerce.number().int().nonnegative(),
   max: z.coerce.number().int().positive(),
   category: z.string().min(1),
-  description: z.string().optional(),
+  description: z.string().optional().default(""),
   refill: flag,
   cancel: flag,
 }).refine((value) => value.max >= value.min, "Maximum must be greater than or equal to minimum");

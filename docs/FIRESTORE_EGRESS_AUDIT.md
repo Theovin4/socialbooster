@@ -64,6 +64,10 @@ No per-chunk telemetry documents are written. The repository includes a guarded 
 
 The first post-release v2-to-v3 migration is expected to read about 5.18 MB before changed-service document reads because it must safely consume the existing snapshot once. That is a bounded one-time conversion, not a daily steady-state cost.
 
+### Compact semantic v4 projection (2026-10-21)
+
+The live v3 snapshot measured 2,329,093 bytes. Adding short coded semantic fields for product-defining variants projects v4 at 2,465,812 bytes (2.35 MiB), an increase of 136,719 bytes (5.9%). The largest projected chunk is 65,353 bytes. Descriptions remain render-time generated and are not stored per row. Warm catalogue reads remain zero, and an unchanged three-provider sync remains six Firestore reads / approximately 10,418 bytes.
+
 ## Ranked large-payload review
 
 1. **`supportAttachments`** — raw bytes allow one document up to 700 KiB. This is the only deliberately large single-document payload and can exceed 100 KB.

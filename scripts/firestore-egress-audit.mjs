@@ -9,10 +9,9 @@ if (!process.argv.includes("--approved-production-read-only")) {
 }
 
 nextEnv.loadEnvConfig(process.cwd());
-const projectId = process.env.FIREBASE_PROJECT_ID;
+const projectId = process.env.FIREBASE_PROJECT_ID || "socialbooster-cbcc6";
 const clientEmail = process.env.FIREBASE_CLIENT_EMAIL;
 const privateKey = process.env.FIREBASE_PRIVATE_KEY?.replace(/\\n/g, "\n");
-if (!projectId) throw new Error("FIREBASE_PROJECT_ID is not configured.");
 if (projectId !== "socialbooster-cbcc6") throw new Error(`Unexpected Firebase project: ${projectId}`);
 
 async function firebaseCliAccessToken() {
@@ -101,6 +100,22 @@ const db = {
 };
 const providers = ["followspanel", "nitro", "smmworld"];
 
+const platformCodes = { "apple music": "am", audiomack: "au", instagram: "ig", tiktok: "tt", facebook: "fb", youtube: "yt", telegram: "tg", "x (twitter)": "x", spotify: "sp", soundcloud: "sc", threads: "th", whatsapp: "wa", linkedin: "li", discord: "dc", twitch: "tw", snapchat: "sn", pinterest: "pi", reddit: "rd", music: "mu" };
+const kindCodes = { subscribers: "sb", members: "m", followers: "f", views: "v", likes: "l", comments: "c", shares: "sh", reactions: "r", plays: "p", streams: "st", engagement: "e", saves: "sv" };
+function projectedSemantics(item) {
+  const name = String(item.name || ""), [categoryPlatform = "Social Media", categoryKind = "Service"] = String(item.category || "").split(" · ");
+  const platformName = Object.keys(platformCodes).find((value) => name.toLowerCase().includes(value)) || categoryPlatform.toLowerCase();
+  const kindName = Object.keys(kindCodes).find((value) => categoryKind.toLowerCase().includes(value)) || categoryKind.toLowerCase();
+  const s = { p: platformCodes[platformName] || platformName.slice(0, 4), k: kindCodes[kindName] || kindName.slice(0, 3) };
+  const variants = [[/\bpositive\b/i, "p"], [/\bnegative\b/i, "n"], [/\bmixed\b/i, "x"], [/\bfemale\b/i, "f"], [/\bmale\b/i, "m"]];
+  const targets = [[/\blive[\s-]*stream\b/i, "ls"], [/\bshorts?\b/i, "sh"], [/\bstor(?:y|ies)\b/i, "st"], [/\breels?\b/i, "r"], [/\bposts?\b/i, "p"], [/\bchannels?\b/i, "c"], [/\bgroups?\b/i, "g"], [/\bpages?\b/i, "pg"], [/\bprofiles?\b/i, "pr"], [/\bvideos?\b/i, "v"], [/\btracks?\b/i, "t"], [/\bplaylists?\b/i, "pl"]];
+  const variant = variants.find(([pattern]) => pattern.test(name)); if (variant) s.v = variant[1];
+  const target = targets.find(([pattern]) => pattern.test(name)); if (target) s.t = target[1];
+  const future = name.match(/\b(\d{1,3})\s+posts?\b/i); if (future) s.n = Number(future[1]);
+  const emojis = name.match(/\p{Extended_Pictographic}\uFE0F?/gu); if (emojis?.length) s.e = [...new Set(emojis)].join(" ");
+  return s;
+}
+
 function documentValue(snapshot) {
   return snapshot.exists ? { id: snapshot.id, ...snapshot.data() } : null;
 }
@@ -139,12 +154,17 @@ for (let index = 0; index < providers.length; index += 1) {
       return compact;
     }) : document.items,
   }));
+  const semanticPublicDocuments = compactPublicDocuments.map((document) => ({
+    ...document, version: 4,
+    items: Array.isArray(document.items) ? document.items.map((item) => ({ ...item, s: item.s || projectedSemantics(item) })) : document.items,
+  }));
   publicByProvider[provider] = {
     version,
     serviceCount: Number(manifest.get("serviceCount") || slots[activeSlot]?.serviceCount || 0),
     manifestBytes: approximateFirestoreValueBytes(documentValue(manifest)),
     chunks: summarizePayloadBytes(publicDocuments),
     compactChunks: summarizePayloadBytes(compactPublicDocuments),
+    semanticV4Chunks: summarizePayloadBytes(semanticPublicDocuments),
   };
 
   const state = syncStates[index];
@@ -161,6 +181,7 @@ for (let index = 0; index < providers.length; index += 1) {
 const publicManifestBytes = Object.values(publicByProvider).reduce((sum, item) => sum + item.manifestBytes, 0);
 const publicChunkBytes = Object.values(publicByProvider).reduce((sum, item) => sum + item.chunks.totalBytes, 0);
 const compactPublicChunkBytes = Object.values(publicByProvider).reduce((sum, item) => sum + item.compactChunks.totalBytes, 0);
+const semanticV4ChunkBytes = Object.values(publicByProvider).reduce((sum, item) => sum + item.semanticV4Chunks.totalBytes, 0);
 const stateBytes = Object.values(fingerprintByProvider).reduce((sum, item) => sum + item.stateBytes, 0);
 const fingerprintBytes = Object.values(fingerprintByProvider).reduce((sum, item) => sum + item.chunks.totalBytes, 0);
 const supportStoredBytes = supportMetadata.docs.reduce((sum, snapshot) => sum + Math.max(0, Number(snapshot.get("size") || 0)), 0);
@@ -175,6 +196,8 @@ const report = {
     totalSnapshotBytes: publicSnapshotReadBytes,
     projectedCompactSnapshotBytes: publicManifestBytes + compactPublicChunkBytes,
     projectedDescriptionSavingsBytes: publicChunkBytes - compactPublicChunkBytes,
+    projectedSemanticV4SnapshotBytes: publicManifestBytes + semanticV4ChunkBytes,
+    projectedSemanticV4DifferenceBytes: semanticV4ChunkBytes - publicChunkBytes,
     providers: publicByProvider,
   },
   providerFingerprints: {

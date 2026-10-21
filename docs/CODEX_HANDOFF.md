@@ -347,3 +347,51 @@ Outstanding work in small phases:
 2. Reconcile the six historical orders one at a time only after locating each exact Followpanel ID. A first partial observation must remain pending confirmation; wait at least five minutes before an intentional second check.
 3. Observe scheduled synchronization and Firestore billing for seven normal days. Do not manually trigger provider catalogue synchronization merely for testing.
 4. Add emulator-backed concurrent transition/refund coverage in a separate maintenance phase; do not broaden this release.
+
+## Service Description Restoration — 2026-10-21
+
+Baseline `77e8c20` remains the deployed and GitHub starting point for this pass. The candidate restores product meaning without restoring repeated provider descriptions or changing order, wallet, payment, pricing, provider-ID, recovery, attribution, referral or Finance behavior.
+
+Architecture and verified progress:
+
+- `normalizePublicServiceName()` now separates provider noise and unsupported claims from factual product attributes. It preserves Telegram positive/negative/mixed reactions, explicit emoji sets, future-post counts, platform surfaces (post/channel/group/story/reel/profile/video/Shorts/live stream/track/playlist), geography, language and legitimate audience qualifiers.
+- Structured runtime semantics drive names, search, duplicate grouping, customer descriptions, `/services`, `/services/[id]`, the order form, API v2 and admin review. Raw provider descriptions are sanitized semantic input only and are never copied to public snapshots or shown to customers.
+- Public snapshot v4 stores only short coded semantic fields under `s` (for example platform, kind, variant and target codes). Customer-facing descriptions remain generated at render time. Provider/internal IDs, prices and provider mappings are untouched.
+- Duplicate grouping now includes semantic distinctions and emoji code points, so positive, negative, mixed and emoji-specific services cannot collapse into one another.
+- Snapshot v4 is migrated only by the next guarded provider synchronization. The manifest switches atomically, immutable chunks remain hash-addressed, v2/v3 read compatibility remains, and the previous v3 slot remains a cross-version fallback.
+- The guarded unchanged-catalogue short circuit still returns before fingerprint/public-snapshot reconstruction. Public catalogue reads still use manifest-bounded immutable cached chunks; warm customer catalogue reads remain zero.
+- Admin service review now shows raw name/category/description, normalized public name, variant/target/region, generated public description and reason codes. A `SEMANTIC_INFORMATION_LOSS` filter is backed by a dedicated composite index.
+- Followpanel description parsing is optional and bounded; Nitro and SMM World retain the same safe optional-description contract. Provider branding, IDs, prices and contact/instruction text are never published.
+
+Bounded production snapshot measurement at `2026-10-21T07:21:54.953Z`:
+
+| Measure | Result |
+| --- | --- |
+| Current production snapshot | v3, 8,512 provider snapshot rows, 2,329,093 bytes (2.22 MiB) |
+| Projected compact semantic v4 | 2,465,812 bytes (2.35 MiB) |
+| Difference | +136,719 bytes (+5.9%) |
+| Largest projected chunk | 65,353 bytes |
+| Warm catalogue | 0 Firestore reads after cache warm-up |
+| Unchanged three-provider sync | 6 reads / approximately 10,418 bytes |
+
+Validation:
+
+| Gate | Result |
+| --- | --- |
+| Full test suite | Passed: 36 files / 197 tests |
+| Semantic regressions | Passed: polarity, emoji, audience, country, future posts, surfaces, search, descriptions and duplicate separation |
+| Firebase Rules | Passed: isolated 3/3 tests within the full suite |
+| TypeScript | Passed: `tsc --noEmit` |
+| ESLint | Passed with zero warnings |
+| Production build | Passed: compilation, TypeScript, page-data collection and all 88 generated pages |
+| Production dependency audit | Passed: zero vulnerabilities |
+| Tracked/source secret scan | Passed; deterministic local API-key fixture reviewed |
+| Finance / pricing / growth / recovery | Regression suites passed; this pass does not change those paths. Last bounded production reconciliation remains `MATCH` from the 2026-10-20 release audit. |
+| Real provider sync/payment/order/refund | Not performed by design |
+
+Next steps stay intentionally small:
+
+1. Commit and push this candidate, deploy the existing Firestore composite index, and allow the existing Vercel project to deploy from `main`.
+2. Perform non-financial route/search/detail QA. Production will continue serving compatible v3 data until the next scheduled guarded provider sync publishes v4; do not manually trigger a provider sync merely for testing.
+3. After the scheduled migration, re-run the bounded egress audit and verify live positive, negative, mixed and emoji-specific Telegram searches and detail pages without placing an order.
+4. Observe Firestore billing and catalogue fallback alerts for seven normal days before considering any further catalogue-storage change.

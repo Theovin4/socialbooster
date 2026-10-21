@@ -6,9 +6,10 @@ import { isFirestoreQuotaError } from "@/lib/firebase/errors";
 import { formatMoney } from "@/lib/money";
 import { getServiceCatalogPage } from "@/lib/service-catalog";
 import { AnalyticsEvent } from "@/components/analytics-event";
+import type { PublicServiceSemantics } from "@/lib/service-quality";
 
 export const dynamic = "force-dynamic";
-type Service = { id: string; name: string; category: string; min: number; max: number; refill: boolean; rate: number };
+type Service = { id: string; name: string; category: string; min: number; max: number; refill: boolean; rate: number; semantics: PublicServiceSemantics };
 
 export async function generateMetadata({ searchParams }: { searchParams: Promise<{ q?: string; page?: string }> }): Promise<Metadata> {
   const { q = "", page = "1" } = await searchParams;
@@ -29,7 +30,7 @@ export default async function Services({ searchParams }: { searchParams: Promise
   let unavailable = false;
   try {
     const result = await getServiceCatalogPage({ query: q, page: requestedPage, pageSize });
-    services = result.items.map((item) => ({ id: item.id, name: item.name, category: item.category, min: item.min, max: item.max, refill: item.refill, rate: item.rateMinor }));
+    services = result.items.map((item) => ({ id: item.id, name: item.name, category: item.category, min: item.min, max: item.max, refill: item.refill, rate: item.rateMinor, semantics: item.semantics }));
     ({ page, total, totalPages, pageSize } = result);
   } catch (error) {
     if (!isFirestoreQuotaError(error)) throw error;
@@ -62,9 +63,9 @@ export default async function Services({ searchParams }: { searchParams: Promise
       {Array.from(groups.entries()).map(([category, items]) => <section className="catalog-group" key={category}>
         <h2 className="catalog-title">{category} <span className="muted" style={{ fontSize: 13, fontWeight: 500 }}>· {items.length} services</span></h2>
         <div className="glass data-table-wrap catalog-table" style={{ borderRadius: "0 0 18px 18px" }}><table className="data-table"><thead><tr><th>ID</th><th>Service</th><th>Rate / 1,000</th><th>Minimum</th><th>Maximum</th><th>Refill</th><th></th></tr></thead><tbody>
-          {items.map((item) => <tr key={item.id}><td>{item.id}</td><td style={{ maxWidth: 480 }}><Link href={`/services/${item.id}`}>{item.name}</Link></td><td><strong>{formatMoney(BigInt(item.rate), "NGN")}</strong></td><td>{item.min.toLocaleString("en-NG")}</td><td>{item.max.toLocaleString("en-NG")}</td><td>{item.refill ? "Available" : "—"}</td><td><Link className="btn" href={`/services/${item.id}`}>Details</Link></td></tr>)}
+          {items.map((item) => <tr key={item.id}><td>{item.id}</td><td style={{ maxWidth: 480 }}><Link href={`/services/${item.id}`}>{item.name}</Link>{item.semantics.variant ? <small className="service-variant">{item.semantics.variant}</small> : null}</td><td><strong>{formatMoney(BigInt(item.rate), "NGN")}</strong></td><td>{item.min.toLocaleString("en-NG")}</td><td>{item.max.toLocaleString("en-NG")}</td><td>{item.refill ? "Available" : "—"}</td><td><Link className="btn" href={`/services/${item.id}`}>Details</Link></td></tr>)}
         </tbody></table></div>
-        <div className="mobile-service-list">{items.map((item) => <article className="glass card" key={item.id}><span className="eyebrow">ID {item.id}</span><h3 style={{ lineHeight: 1.45 }}><Link href={`/services/${item.id}`}>{item.name}</Link></h3><strong style={{ fontSize: 21 }}>{formatMoney(BigInt(item.rate), "NGN")} / 1,000</strong><p className="muted">Min {item.min.toLocaleString("en-NG")} · Max {item.max.toLocaleString("en-NG")} · Refill {item.refill ? "Yes" : "No"}</p><Link className="btn primary" href={`/services/${item.id}`}>View service details</Link></article>)}</div>
+        <div className="mobile-service-list">{items.map((item) => <article className="glass card" key={item.id}><span className="eyebrow">ID {item.id}</span><h3 style={{ lineHeight: 1.45 }}><Link href={`/services/${item.id}`}>{item.name}</Link></h3>{item.semantics.variant ? <small className="service-variant">{item.semantics.variant}</small> : null}<strong style={{ display: "block", fontSize: 21, marginTop: 10 }}>{formatMoney(BigInt(item.rate), "NGN")} / 1,000</strong><p className="muted">Min {item.min.toLocaleString("en-NG")} · Max {item.max.toLocaleString("en-NG")} · Refill {item.refill ? "Yes" : "No"}</p><Link className="btn primary" href={`/services/${item.id}`}>View service details</Link></article>)}</div>
       </section>)}
       {totalPages > 1 ? <nav aria-label="Service catalogue pages" style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 12, marginTop: 26 }}><span className="muted">Page {page.toLocaleString("en-NG")} of {totalPages.toLocaleString("en-NG")}</span><div style={{ display: "flex", gap: 10 }}>{page > 1 ? <Link className="btn" href={pageHref(page - 1)}>Previous</Link> : null}{page < totalPages ? <Link className="btn primary" href={pageHref(page + 1)}>Next</Link> : null}</div></nav> : null}
     </>}

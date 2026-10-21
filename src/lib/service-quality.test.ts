@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { assertServiceOrderEligible, choosePreferredDuplicateServices, complianceStatusForService, evaluateServiceQuality, normalizePublicServiceName, normalizeServiceCategory, priceStatusForService, rankFeaturedServices, sanitizePublicCatalogCandidate, ServiceUnavailableError } from "./service-quality";
+import { assertServiceOrderEligible, choosePreferredDuplicateServices, compactPublicServiceSemantics, complianceStatusForService, evaluateServiceQuality, expandPublicServiceSemantics, extractPublicServiceSemantics, matchesServiceSearch, normalizePublicServiceName, normalizeServiceCategory, priceStatusForService, publicServiceDescription, rankFeaturedServices, sanitizePublicCatalogCandidate, ServiceUnavailableError } from "./service-quality";
 
 const valid = { name: "Instagram followers", category: "Instagram", min: 10, max: 10_000, rateMinor: 1250n, providerFunded: true };
 
@@ -47,6 +47,36 @@ describe("normalizePublicServiceName", () => {
     expect(name).toBe("Instagram Followers");
     expect(name.toLocaleLowerCase()).not.toMatch(/followspanel|top service|guarantee/);
   });
+
+  it("preserves reaction polarity and explicit emoji sets", () => {
+    expect(normalizePublicServiceName("Telegram Positive Reactions", "Telegram")).toBe("Telegram Positive Reactions");
+    expect(normalizePublicServiceName("Telegram Negative Reactions", "Telegram")).toBe("Telegram Negative Reactions");
+    expect(normalizePublicServiceName("Telegram Mixed Reactions", "Telegram")).toBe("Telegram Mixed Reactions");
+    expect(normalizePublicServiceName("Telegram Reactions 👍 ❤️ 🔥", "Telegram")).toBe("Telegram Reactions — 👍 ❤️ 🔥");
+  });
+
+  it("keeps product meaning while removing unsupported claims", () => {
+    expect(normalizePublicServiceName("100% Real Guaranteed Non-Drop Telegram Positive Reactions", "Telegram")).toBe("Telegram Positive Reactions");
+    expect(normalizePublicServiceName("Instagram Female Followers Nigeria", "Instagram")).toBe("Instagram Followers — Female — Nigeria");
+    expect(normalizePublicServiceName("Instagram Reel Views", "Instagram")).toBe("Instagram Reel Views");
+    expect(normalizePublicServiceName("Instagram Story Views", "Instagram")).toBe("Instagram Story Views");
+    expect(normalizePublicServiceName("Facebook Post Reactions", "Facebook")).toBe("Facebook Post Reactions");
+    expect(normalizePublicServiceName("Telegram Channel Members", "Telegram")).toBe("Telegram Channel Members");
+    expect(normalizePublicServiceName("Telegram Group Members", "Telegram")).toBe("Telegram Group Members");
+  });
+
+  it("uses sanitized provider descriptions only as semantic input", () => {
+    const semantics = extractPublicServiceSemantics("Telegram Reactions", "Telegram", "Followspanel API: Positive Reactions for posts. Guaranteed real. Contact support@example.test");
+    expect(semantics).toMatchObject({ platform: "Telegram", kind: "Reactions", reactionPolarity: "Positive", target: "Post" });
+    expect(JSON.stringify(semantics).toLocaleLowerCase()).not.toMatch(/followspanel|guaranteed|support@example/);
+  });
+
+  it("round-trips compact snapshot codes without losing meaning", () => {
+    const semantics = extractPublicServiceSemantics("Telegram Positive Reactions 👍 ❤️", "Telegram");
+    const compact = compactPublicServiceSemantics(semantics);
+    expect(compact).toEqual({ p: "tg", k: "r", v: "p", e: "👍 ❤️" });
+    expect(expandPublicServiceSemantics(compact)).toEqual(semantics);
+  });
 });
 
 describe("public catalogue curation", () => {
@@ -59,6 +89,39 @@ describe("public catalogue curation", () => {
   it("ranks explicit featured services before ordinary provider order", () => {
     const services = [{ ...base, id: "a", rateMinor: 1000 }, { ...base, id: "b", rateMinor: 2000, featured: true, name: "Instagram Likes", category: "Instagram · Likes" }];
     expect(rankFeaturedServices(services)[0].id).toBe("b");
+  });
+
+  it("does not deduplicate positive, negative or mixed reaction variants", () => {
+    const variants = ["Positive", "Negative", "Mixed"] as const;
+    const services = variants.map((variant, index) => ({ ...base, id: String(index), name: "Telegram Reactions", category: "Telegram · Reactions", semantics: { platform: "Telegram", kind: "Reactions", variant, reactionPolarity: variant, linkType: "Post URL" }, rateMinor: 1500 }));
+    expect(choosePreferredDuplicateServices(services)).toHaveLength(3);
+  });
+
+  it("does not deduplicate different reaction emoji sets", () => {
+    const services = [
+      { ...base, id: "thumb", name: "Telegram Reactions", category: "Telegram · Reactions", semantics: { platform: "Telegram", kind: "Reactions", reactionEmojis: ["👍"], linkType: "Post URL" }, rateMinor: 1500 },
+      { ...base, id: "heart", name: "Telegram Reactions", category: "Telegram · Reactions", semantics: { platform: "Telegram", kind: "Reactions", reactionEmojis: ["❤️"], linkType: "Post URL" }, rateMinor: 1500 },
+    ];
+    expect(choosePreferredDuplicateServices(services)).toHaveLength(2);
+  });
+});
+
+describe("customer-facing semantic copy and search", () => {
+  const positive = { id: "positive", name: "Telegram Reactions — Positive", category: "Telegram · Reactions", description: "Adds positive reactions.", semantics: { platform: "Telegram", kind: "Reactions", variant: "Positive", reactionPolarity: "Positive" as const, linkType: "Post URL" } };
+  const negative = { id: "negative", name: "Telegram Reactions — Negative", category: "Telegram · Reactions", description: "Adds negative reactions.", semantics: { platform: "Telegram", kind: "Reactions", variant: "Negative", reactionPolarity: "Negative" as const, linkType: "Post URL" } };
+
+  it("finds the requested reaction variant", () => {
+    expect(matchesServiceSearch(positive, "positive telegram reactions")).toBe(true);
+    expect(matchesServiceSearch(positive, "negative telegram reactions")).toBe(false);
+    expect(matchesServiceSearch(negative, "negative telegram reactions")).toBe(true);
+  });
+
+  it("generates factual copy with limits, refill and cancellation", () => {
+    const description = publicServiceDescription({ ...positive, min: 10, max: 5_000, refill: true, cancel: false });
+    expect(description).toMatch(/positive reactions.*Telegram post/i);
+    expect(description).toMatch(/10 to 5,000/);
+    expect(description).toMatch(/Refill support is available/);
+    expect(description).toMatch(/Cancellation is not available/);
   });
 });
 

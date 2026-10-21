@@ -32,6 +32,7 @@ import {
 import { lagosDateKey } from "./stats";
 import { PROVIDER_KEYS } from "../providers";
 import { readPublicCatalogSnapshot, type PublicCatalogSnapshotItem } from "../public-catalog-snapshot";
+import type { PublicServiceSemantics } from "../service-quality";
 import { choosePreferredDuplicateServices, sanitizePublicCatalogCandidate } from "../service-quality";
 
 const PAGE_SIZE = 250;
@@ -246,7 +247,7 @@ async function authoritativePublicCatalogCount() {
     snapshots
       .flatMap((snapshot) => snapshot?.items || [])
       .map(sanitizePublicCatalogCandidate)
-      .filter((item): item is PublicCatalogSnapshotItem => item !== null && item.active !== false),
+      .filter((item): item is PublicCatalogSnapshotItem & { semantics: PublicServiceSemantics } => item !== null && item.active !== false),
   ).length;
 }
 
