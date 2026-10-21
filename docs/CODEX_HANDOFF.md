@@ -378,7 +378,7 @@ Validation:
 
 | Gate | Result |
 | --- | --- |
-| Full test suite | Passed: 36 files / 197 tests |
+| Full test suite | Passed: 36 files / 198 tests |
 | Semantic regressions | Passed: polarity, emoji, audience, country, future posts, surfaces, search, descriptions and duplicate separation |
 | Firebase Rules | Passed: isolated 3/3 tests within the full suite |
 | TypeScript | Passed: `tsc --noEmit` |

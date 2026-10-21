@@ -18,7 +18,7 @@ describe("Firebase optimization architecture", () => {
   });
 
   it("keeps the v3 hash shape compatible while hashing v4 semantics", () => {
-    const { s: _semantics, updatedAt: _updatedAt, ...legacy } = item;
+    const legacy = Object.fromEntries(Object.entries(item).filter(([key]) => key !== "s" && key !== "updatedAt"));
     const expectedV3 = createHash("sha256").update(JSON.stringify([legacy])).digest("hex");
     expect(publicCatalogHash([{ ...item, s: undefined }])).toBe(expectedV3);
     expect(publicCatalogHash([item])).not.toBe(expectedV3);

@@ -123,6 +123,12 @@ describe("customer-facing semantic copy and search", () => {
     expect(description).toMatch(/Refill support is available/);
     expect(description).toMatch(/Cancellation is not available/);
   });
+
+  it("uses the correct article for vowel-starting platform names", () => {
+    const semantics = extractPublicServiceSemantics("Instagram Female Followers Nigeria");
+    const description = publicServiceDescription({ name: "Instagram Followers — Female — Nigeria", min: 10, max: 5_000, refill: false, cancel: false, semantics });
+    expect(description).toMatch(/^Adds followers to an Instagram profile/);
+  });
 });
 
 describe("confirmed catalogue regressions", () => {

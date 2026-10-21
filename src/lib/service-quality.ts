@@ -316,7 +316,8 @@ export function publicServiceDescription(input: { name: string; min: number; max
       : kind;
   const scope = semantics.futurePostCount ? ` across the next ${semantics.futurePostCount} posts` : "";
   const qualifier = [semantics.audienceQualifier, semantics.region, semantics.language].filter(Boolean).join(", ");
-  const first = `Adds ${subject} to a ${semantics.platform} ${location.toLocaleLowerCase("en")}${scope}${qualifier ? ` for the ${qualifier} option` : ""}.`;
+  const article = /^[aeiou]/i.test(semantics.platform) ? "an" : "a";
+  const first = `Adds ${subject} to ${article} ${semantics.platform} ${location.toLocaleLowerCase("en")}${scope}${qualifier ? ` for the ${qualifier} option` : ""}.`;
   const link = `Use the direct ${semantics.linkType?.replace(/ URL$/, "").toLocaleLowerCase("en") || "target"} link.`;
   const limits = `Select a quantity from ${input.min.toLocaleString("en-NG")} to ${input.max.toLocaleString("en-NG")}.`;
   return `${first} ${link} ${limits} ${input.refill ? "Refill support is available when its conditions are met." : "Refill is not included."} ${input.cancel ? "Cancellation is available while the order remains eligible." : "Cancellation is not available after submission."}`;
