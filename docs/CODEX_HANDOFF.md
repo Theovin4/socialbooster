@@ -1,5 +1,19 @@
 # Social Booster Codex handoff
 
+## Emergency full service-description restoration (22 October 2026)
+
+The customer-facing description regression was traced to the correct compact-catalogue optimization: `publicCatalogChunks` intentionally stopped carrying long provider text, but the service page and new-order form continued to use the generated semantic preview. The repair preserves that compact catalogue and adds an independent server-only `publicServiceDetails` document per internal service ID.
+
+- Provider catalogue text is sanitized to readable customer text with a 5,000-character ceiling. Unsafe HTML, provider branding, URLs, contacts, wholesale data, API material and internal notes are removed while delivery, speed, refill, link, targeting, warnings and other product facts are retained.
+- `shortDescription` remains the generated catalogue preview. `fullDescription` uses sanitized provider text whenever available, otherwise an explicitly labelled `generated_fallback`.
+- `/services/[id]` loads and displays the full description. `/dashboard/new-order` fetches only the selected public service from `/api/public/services/[id]/details`, shows loading/failure states, and blocks submission until details are available.
+- The details repository performs one Firestore document read on a cold per-service cache and zero repeated reads while warm. Long descriptions are not stored in or loaded with catalogue chunks.
+- Normal provider synchronization compares description hashes, writes only missing/changed details, and invalidates only the affected service-detail cache tag. Description-only changes do not broadly invalidate the catalogue.
+- The guarded admin maintenance endpoint accepts the exact `RESTORE_PUBLIC_SERVICE_DESCRIPTIONS` confirmation, supports a mandatory dry-run phase, calls provider `services()` only, reports writes/bytes/coverage/quality samples, and never calls provider order, balance, wallet, payment, refund or customer mutation paths.
+- Browser Firestore access to `publicServiceDetails` is explicitly denied; customer-safe details are returned only through the bounded public-ID endpoint.
+
+Local release gates before deployment: TypeScript passed, ESLint passed, 37 test files / 204 tests passed, production build passed, production dependency audit reported zero vulnerabilities, tracked-source secret scan passed, and `git diff --check` passed. Production dry run, description-only backfill, live examples and final deployment evidence remain the next controlled phase.
+
 Snapshot date: 19 October 2026 (Africa/Lagos)
 
 ## Recovery and repository state

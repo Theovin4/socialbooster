@@ -68,6 +68,20 @@ describe("Firebase optimization architecture", () => {
     expect(page).not.toContain("adminDb");
   });
 
+  it("loads and caches one full description without expanding catalogue payloads", () => {
+    const details = readFileSync(new URL("./public-service-details.ts", import.meta.url), "utf8");
+    const endpoint = readFileSync(new URL("../app/api/public/services/[id]/details/route.ts", import.meta.url), "utf8");
+    const orderPage = readFileSync(new URL("../app/dashboard/new-order/page.tsx", import.meta.url), "utf8");
+    const orderForm = readFileSync(new URL("../components/new-order-form.tsx", import.meta.url), "utf8");
+    expect(details).toContain("unstable_cache");
+    expect(details).toContain('collection("publicServiceDetails").doc(service.internalId).get()');
+    expect(details).not.toContain(".listDocuments(");
+    expect(endpoint).toContain("/^SB-[A-F0-9]{16}$/");
+    expect(orderPage).not.toContain("fullDescription:");
+    expect(orderForm).toContain("/api/public/services/${encodeURIComponent(serviceId)}/details");
+    expect(orderForm).toContain('detailsStatus !== "ready"');
+  });
+
   it("forces a bounded snapshot rebuild when catalogue quality rules change", () => {
     const sync = readFileSync(new URL("./services-sync.ts", import.meta.url), "utf8");
     expect(sync).toContain("QUALITY_RULESET_VERSION = 4");

@@ -10,6 +10,7 @@ import { refreshPublicCatalogManifest, synchronizeProviderServices } from "@/lib
 import { evaluateServiceQuality } from "@/lib/service-quality";
 import { patchPublicCatalogSnapshotService } from "@/lib/public-catalog-snapshot";
 import { normalizeProviderKey } from "@/lib/providers";
+import { publicServiceDetailsTag } from "@/lib/public-service-details";
 
 async function refresh(publicCatalogueChanged: boolean) {
   if (publicCatalogueChanged) {
@@ -30,6 +31,7 @@ export async function syncAllServices(formData: FormData) {
   try {
     const result = await synchronizeProviderServices(provider, { trigger: "manual" });
     publicCatalogueChanged = result.publicCatalogueChanged;
+    result.detailChangedIds.forEach((id) => revalidateTag(publicServiceDetailsTag(id), "max"));
   }
   catch (error) {
     const message = error instanceof Error ? error.message : String(error);
