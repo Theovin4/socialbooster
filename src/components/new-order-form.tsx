@@ -15,7 +15,7 @@ export function NewOrderForm({ services, selectedId, action }: { services: Order
   const [serviceId, setServiceId] = useState(selectedId || "");
   const [quantity, setQuantity] = useState("");
   const [details, setDetails] = useState<LoadedDetails | null>(null);
-  const [detailsStatus, setDetailsStatus] = useState<"idle" | "loading" | "ready" | "error">("idle");
+  const [detailsStatus, setDetailsStatus] = useState<"idle" | "loading" | "ready" | "error">(selectedId ? "loading" : "idle");
   const [state, formAction, pending] = useActionState(action, { status: "idle", message: "" } as OrderActionState);
   const service = services.find((item) => item.id === serviceId);
   const numericQuantity = Number(quantity || 0);
@@ -23,10 +23,8 @@ export function NewOrderForm({ services, selectedId, action }: { services: Order
   const validQuantity = !!service && Number.isInteger(numericQuantity) && numericQuantity >= service.min && numericQuantity <= service.max;
   useEffect(() => { if (state.status === "error") trackAnalyticsEvent("order_failure", { reason: "validation_or_submission" }); }, [state.status]);
   useEffect(() => {
-    setDetails(null);
-    if (!serviceId) { setDetailsStatus("idle"); return; }
+    if (!serviceId) return;
     const controller = new AbortController();
-    setDetailsStatus("loading");
     fetch(`/api/public/services/${encodeURIComponent(serviceId)}/details`, { signal: controller.signal })
       .then(async (response) => { if (!response.ok) throw new Error("Details unavailable"); return response.json() as Promise<LoadedDetails>; })
       .then((value) => { setDetails(value); setDetailsStatus("ready"); })

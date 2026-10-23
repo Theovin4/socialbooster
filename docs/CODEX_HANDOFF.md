@@ -13,9 +13,24 @@ The customer-facing description regression was traced to the correct compact-cat
 - `/admin/service-descriptions` exposes separate protected dry-run and execute controls so the production repair can be performed through a server-verified administrator session and visibly reviewed between phases.
 - Browser Firestore access to `publicServiceDetails` is explicitly denied; customer-safe details are returned only through the bounded public-ID endpoint.
 
-Local release gates before deployment: TypeScript passed, ESLint passed, 37 test files / 204 tests passed, production build passed, production dependency audit reported zero vulnerabilities, tracked-source secret scan passed, and `git diff --check` passed. Production dry run, description-only backfill, live examples and final deployment evidence remain the next controlled phase.
+Production repair evidence:
 
-Snapshot date: 19 October 2026 (Africa/Lagos)
+- Implementation commits `a82e620` and `4ef5d9d` were pushed to `main`. Existing Vercel project `socialbooster` deployed `4ef5d9df85aa7f91f5dda5a4500805d6b6653289` as `dpl_FTRHew61vZ38EywxcPRUpJwQyoJh`; it reached `READY` and serves the existing production aliases.
+- The required production dry run found 8,490 internal detail documents for 2,999 deduplicated public/orderable services: 723 exposed provider descriptions, 2,276 explicit generated fallbacks, zero blanks and 100% coverage. The controlled plan was 8,303 creates, zero updates, 187 unchanged documents and 5,192,160 estimated description bytes.
+- The explicitly confirmed description-only backfill completed with those exact counts. It called provider catalogue reads only. It did not submit a provider order or mutate a wallet, payment, refund, customer order or referral reward.
+- A verification dry run returned zero creates, zero updates and 8,490 unchanged documents, proving that the repair completed and is idempotent.
+- Provider detail-document coverage was Followpanel 576/576 (576 provider descriptions, zero fallbacks), Nitro 7,229/7,229 (783 provider descriptions, 6,446 fallbacks), and SMM World 685/685 (zero provider descriptions, 685 fallbacks). All three providers had zero blank descriptions.
+- Live `/services/[id]` checks proved that provider descriptions and explicit fallbacks are visible, provider identity is hidden, and names retain reaction polarity, emoji and surface distinctions. Telegram positive, negative and emoji-specific services were verified. The current public inventory has no Telegram mixed-reaction service; the `telegram mixed reactions` and `telegram mix` searches did not expose one, so none was fabricated.
+- Signed-in `/dashboard/new-order` checks selected both a provider-description service and a fallback service. Each loaded only its chosen description before submission; price, minimum, maximum, variant, target, link type, refill and cancellation remained visible. The Place Order button stayed disabled and no order data was entered.
+- Ten live production samples were checked through the bounded customer-safe endpoint: `SB-BB20A8EFE34FF94F`, `SB-1DBEDCD7CF4F4506`, `SB-50C0C1AC28C3EBE8`, `SB-57561C4B2901C609`, `SB-94F6D8B55C8020F3`, `SB-2A826776CA7EA941`, `SB-1F63B5687973E807`, `SB-60688B01B354CEC7`, `SB-16C8AE37FC293710` and `SB-A6E6B00B8BDEA98B`. They cover Telegram, TikTok, Instagram, YouTube, Facebook and SoundCloud. Where an upstream provider supplies very terse text such as `pick. Refill within 30 days of completing.`, the sanitized provider text is faithfully preserved and the richer generated catalogue preview remains separately visible.
+- The final local gate after the React-effect lint repair passed: 37 test files / 204 tests, isolated Firestore rules 3/3 within that suite, TypeScript, ESLint, production build with all 88 generated pages, production dependency audit with zero vulnerabilities, tracked-source secret scan, and `git diff --check`.
+- Production Finance remained healthy with rollup version 2, historical backfill complete and stored reconciliation `MATCH` from the bounded release audit. No pricing or money file changed; the 40% gross-margin formula and regression suite remain intact.
+- Detail payloads average approximately 612 bytes and peak at 1,084 bytes. Architecture remains one Firestore document read on the first uncached selected-service request and zero while its immutable cache is warm. Even a conservative 5,000 cold detail reads per day projects roughly 163 MB/month of raw detail payloads (comfortably below 1 GiB and the 10 GiB Spark ceiling); normal cached traffic should be materially lower.
+- Vercel runtime-log inspection for the production deployment showed zero error, fatal or warning groups in the available 30-minute Hobby-plan window after live QA.
+
+Remaining work is operational only: observe catalogue/description quality and Firestore billing, and correct provider-source text only through a separately reviewed content-quality rule. Do not re-run the production backfill unless a future dry run shows a hash change or missing document.
+
+Snapshot date: 23 October 2026 (Africa/Lagos)
 
 ## Recovery and repository state
 
