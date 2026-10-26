@@ -133,7 +133,7 @@ function decodeDisplayEntities(value: string) {
  * deliberately separate from this customer-visible title.
  */
 export function publicDisplayName(rawName: string) {
-  const value = decodeDisplayEntities(String(rawName || "").normalize("NFKC"))
+  const value = decodeDisplayEntities(String(rawName || "").normalize("NFC"))
     .replace(/<!--[\s\S]*?-->/g, " ")
     .replace(/<(script|style)\b[^>]*>[\s\S]*?<\/\1>/gi, " ")
     .replace(/<[^>]+>/g, " ")

@@ -85,6 +85,8 @@ describe("publicDisplayName", () => {
       .toBe("TG Mix Positive Reaction [👍😍🎉🔥❤️🥰👏] + Free View [Non Drop]");
     expect(publicDisplayName("TG Mix Negative Reaction [👎😬😢💩🤮😨🤯] + Free View [Instant / Non Drop]"))
       .toBe("TG Mix Negative Reaction [👎😬😢💩🤮😨🤯] + Free View [Instant / Non Drop]");
+    expect(publicDisplayName("Auto TG Mix 𝗣𝗿𝗲𝗺𝗶𝘂𝗺 𝐏𝐨𝐬𝐢𝐭𝐢𝐯𝐞 Reaction"))
+      .toBe("Auto TG Mix 𝗣𝗿𝗲𝗺𝗶𝘂𝗺 𝐏𝐨𝐬𝐢𝐭𝐢𝐯𝐞 Reaction");
   });
 
   it("decodes entities and removes only unsafe or private provider material", () => {
