@@ -116,6 +116,43 @@ function dedupeWords(value: string) {
   return tokens.filter((token, index) => index === 0 || token.toLocaleLowerCase("en") !== tokens[index - 1].toLocaleLowerCase("en")).join(" ");
 }
 
+function decodeDisplayEntities(value: string) {
+  const named: Record<string, string> = { amp: "&", lt: "<", gt: ">", quot: '"', apos: "'", nbsp: " " };
+  return value.replace(/&(?:#x([0-9a-f]+)|#(\d+)|([a-z]+));/gi, (match, hex, decimal, name) => {
+    if (hex || decimal) {
+      const codePoint = Number.parseInt(hex || decimal, hex ? 16 : 10);
+      return Number.isSafeInteger(codePoint) && codePoint >= 0 && codePoint <= 0x10FFFF ? String.fromCodePoint(codePoint) : " ";
+    }
+    return named[String(name).toLocaleLowerCase("en")] ?? match;
+  });
+}
+
+/**
+ * Keeps the carrier's customer-relevant wording while removing only private,
+ * unsafe or provider-identifying material. Internal semantic normalization is
+ * deliberately separate from this customer-visible title.
+ */
+export function publicDisplayName(rawName: string) {
+  const value = decodeDisplayEntities(String(rawName || "").normalize("NFKC"))
+    .replace(/<!--[\s\S]*?-->/g, " ")
+    .replace(/<(script|style)\b[^>]*>[\s\S]*?<\/\1>/gi, " ")
+    .replace(/<[^>]+>/g, " ")
+    .replace(/https?:\/\/\S+|www\.\S+/gi, " ")
+    .replace(/[\w.+-]+@[\w.-]+\.[a-z]{2,}/gi, " ")
+    .replace(/\b(?:followspanel|follows?\s*panel|nitro\s*(?:ng)?|smm\s*world)\b/gi, " ")
+    .replace(/\b(?:provider|carrier)\s*(?:service\s*)?(?:id|#)\s*[:#-]?\s*[a-z0-9_-]+\b/gi, " ")
+    .replace(/\bservice\s*(?:id|#)\s*[:#-]?\s*[a-z0-9_-]+\b/gi, " ")
+    .replace(/\b(?:contact|support|whatsapp)\s*[:=-]\s*(?:@?[\w.+-]+|\+?\d[\d\s().-]{7,}\d)\b/gi, " ")
+    .replace(/\b(?:contact|support|whatsapp)\s*[:=-]\s*(?=$|[|•·—-])/gi, " ")
+    .replace(/\s+/g, " ")
+    .replace(/^[\s|•·—-]+|[\s|•·—-]+$/g, "")
+    .trim();
+  if (!value) return "Social Media Service";
+  if (value.length <= 240) return value;
+  const candidate = value.slice(0, 239), boundary = candidate.lastIndexOf(" ");
+  return `${candidate.slice(0, boundary > 190 ? boundary : candidate.length).trimEnd()}…`;
+}
+
 function cleanText(value: string) {
   return dedupeWords(value
     .normalize("NFKC")
@@ -323,9 +360,9 @@ export function publicServiceDescription(input: { name: string; min: number; max
   return `${first} ${link} ${limits} ${input.refill ? "Refill support is available when its conditions are met." : "Refill is not included."} ${input.cancel ? "Cancellation is available while the order remains eligible." : "Cancellation is not available after submission."}`;
 }
 
-export function serviceSearchText(input: { id?: string; name: string; category: string; description?: string; semantics?: PublicServiceSemantics }) {
+export function serviceSearchText(input: { id?: string; name: string; normalizedName?: string; category: string; description?: string; semantics?: PublicServiceSemantics }) {
   const semantics = input.semantics;
-  return [input.id, input.name, input.category, input.description, semantics?.platform, semantics?.kind, semantics?.variant, semantics?.target, semantics?.region, semantics?.scope, semantics?.reactionPolarity, semantics?.reactionEmojis?.join(" "), semantics?.futurePostCount, semantics?.audienceQualifier, semantics?.language, semantics?.linkType]
+  return [input.id, input.name, input.normalizedName, input.category, input.description, semantics?.platform, semantics?.kind, semantics?.variant, semantics?.target, semantics?.region, semantics?.scope, semantics?.reactionPolarity, semantics?.reactionEmojis?.join(" "), semantics?.futurePostCount, semantics?.audienceQualifier, semantics?.language, semantics?.linkType]
     .filter(Boolean).join(" ").toLocaleLowerCase("en");
 }
 
@@ -373,7 +410,7 @@ export function serviceDuplicateGroupKey(input: { publicName: string; category: 
     .join("|").toLocaleLowerCase("en").replace(/[^\p{L}\p{N}|-]+/gu, "-").slice(0, 300);
 }
 
-type PublicServiceCandidate = { id: string; name: string; category: string; min: number; max: number; type: string; refill: boolean; cancel: boolean; rateMinor: number; featured: boolean; active?: boolean; semantics?: PublicServiceSemantics };
+type PublicServiceCandidate = { id: string; name: string; publicDisplayName?: string; category: string; min: number; max: number; type: string; refill: boolean; cancel: boolean; rateMinor: number; featured: boolean; active?: boolean; semantics?: PublicServiceSemantics };
 
 /** Keeps one deterministic public representative while retaining every source record internally. */
 export function choosePreferredDuplicateServices<T extends PublicServiceCandidate>(services: T[]) {
@@ -487,7 +524,7 @@ export function assertServiceOrderEligible(data: Record<string, unknown>) {
 }
 
 /** Secondary zero-read guard for legacy snapshot rows already in cache. */
-export function sanitizePublicCatalogCandidate<T extends PublicServiceCandidate>(item: T): (T & { semantics: PublicServiceSemantics }) | null {
+export function sanitizePublicCatalogCandidate<T extends PublicServiceCandidate>(item: T): (T & { name: string; normalizedName?: string; semantics: PublicServiceSemantics }) | null {
   if (item.active === false || !Number.isSafeInteger(item.rateMinor)) return null;
   const quality = evaluateServiceQuality({
     name: item.name, category: item.category, min: item.min, max: item.max,
@@ -495,5 +532,5 @@ export function sanitizePublicCatalogCandidate<T extends PublicServiceCandidate>
     type: item.type, refill: item.refill, cancel: item.cancel, active: true,
   });
   if (!quality.publicEligible) return null;
-  return { ...item, name: quality.publicName, category: quality.normalizedCategory, semantics: item.semantics || quality.semantics };
+  return { ...item, name: item.publicDisplayName || quality.publicName, normalizedName: quality.publicName, category: quality.normalizedCategory, semantics: item.semantics || quality.semantics };
 }

@@ -20,6 +20,7 @@ export type CachedService = {
   id: string;
   internalId: string;
   name: string;
+  normalizedName: string;
   category: string;
   type: string;
   description: string;
@@ -97,7 +98,7 @@ export async function getActiveServiceCatalog(): Promise<CachedService[]> {
   return choosePreferredDuplicateServices(snapshots
     .flat()
     .map(sanitizePublicCatalogCandidate)
-    .filter((item): item is PublicCatalogSnapshotItem & { semantics: PublicServiceSemantics } => item !== null)
+    .filter((item): item is PublicCatalogSnapshotItem & { normalizedName: string; semantics: PublicServiceSemantics } => item !== null)
     .map((item) => {
       const semantics = item.s ? expandPublicServiceSemantics(item.s) : item.semantics;
       return { ...item, semantics, description: publicServiceDescription({ ...item, semantics }), updatedAt: item.updatedAt || null };
@@ -146,7 +147,7 @@ async function buildServiceCatalogPage(input: ServiceCatalogPageInput): Promise<
 const getCachedServiceCatalogPage = unstable_cache(
   async (query: string, category: string, page: number, pageSize: number, selectedId: string) =>
     buildServiceCatalogPage({ query, category, page, pageSize, selectedId }),
-  ["active-service-catalog-v10-page"],
+  ["active-service-catalog-v11-display-title-page"],
   { tags: [SERVICE_CATALOG_TAG] },
 );
 

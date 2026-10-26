@@ -17,11 +17,12 @@ describe("Firebase optimization architecture", () => {
     expect(shouldPublishPublicSnapshot(hash, publicCatalogHash([{ ...item, rateMinor: 1_500 }]))).toBe(true);
   });
 
-  it("keeps the v3 hash shape compatible while hashing v4 semantics", () => {
+  it("keeps older hash shapes compatible while hashing compact semantics and exact display titles", () => {
     const legacy = Object.fromEntries(Object.entries(item).filter(([key]) => key !== "s" && key !== "updatedAt"));
     const expectedV3 = createHash("sha256").update(JSON.stringify([legacy])).digest("hex");
     expect(publicCatalogHash([{ ...item, s: undefined }])).toBe(expectedV3);
     expect(publicCatalogHash([item])).not.toBe(expectedV3);
+    expect(publicCatalogHash([{ ...item, publicDisplayName: "Exact upstream title" }])).not.toBe(publicCatalogHash([item]));
   });
 
   it("keeps immutable catalogue chunks cached by snapshot hash without time expiry or broad invalidation", () => {
@@ -80,6 +81,9 @@ describe("Firebase optimization architecture", () => {
     expect(orderPage).not.toContain("fullDescription:");
     expect(orderForm).toContain("/api/public/services/${encodeURIComponent(serviceId)}/details");
     expect(orderForm).toContain('detailsStatus !== "ready"');
+    expect(orderForm).not.toContain("<select");
+    expect(orderForm).toContain('role="dialog"');
+    expect(orderForm).toContain("Search service name or ID...");
   });
 
   it("forces a bounded snapshot rebuild when catalogue quality rules change", () => {

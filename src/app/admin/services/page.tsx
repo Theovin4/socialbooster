@@ -5,7 +5,7 @@ import { isProviderKey, type ProviderKey } from "@/lib/providers";
 import { FieldPath } from "firebase-admin/firestore";
 import Link from "next/link";
 import { approveService, setServiceGovernance, setServicePriceOverride, syncAllServices } from "./actions";
-import { evaluateServiceQuality, publicServiceDescription } from "@/lib/service-quality";
+import { evaluateServiceQuality, publicDisplayName, publicServiceDescription } from "@/lib/service-quality";
 import { publicServiceId } from "@/lib/service-public-id";
 
 export const dynamic = "force-dynamic";
@@ -90,12 +90,14 @@ export default async function AdminServices({ searchParams }: { searchParams: Pr
             const local = result.approvedMap.get(doc.id);
             const active = local?.active === true;
             const quality = evaluateServiceQuality({ name: String(provider.rawName || provider.name || ""), category: String(provider.rawCategoryName || provider.categoryName || ""), description: String(provider.rawDescription || provider.description || ""), min: Number(provider.minQuantity), max: Number(provider.maxQuantity), rateMinor: BigInt(Number(provider.providerRateNgnMinor || provider.providerRateMinor || 0)), sellingRateMinor: BigInt(Number(provider.sellingRateMinor || 0)), providerFunded: true, type: String(provider.type || ""), refill: provider.refillSupported === true, cancel: provider.cancelSupported === true, active: provider.active === true, stale: provider.isActive === false });
+            const displayName = publicDisplayName(String(provider.rawName || provider.name || ""));
             const publicDescription = publicServiceDescription({ name: quality.publicName, min: Number(provider.minQuantity), max: Number(provider.maxQuantity), refill: provider.refillSupported === true, cancel: provider.cancelSupported === true, semantics: quality.semantics });
             return (
               <article className="glass card" key={doc.id} style={{ display: "grid", gridTemplateColumns: "1fr auto", gap: 20, alignItems: "center" }}>
                 <div>
                   <p className="eyebrow" style={{ margin: 0 }}>Raw category: {provider.rawCategoryName || provider.categoryName}</p>
                   <h2 style={{ fontSize: 18, margin: "8px 0" }}>Raw name: {provider.rawName || provider.name}</h2>
+                  <p style={{ margin: "0 0 8px" }}><strong>Public display name:</strong> {displayName}</p>
                   {provider.rawDescription || provider.description ? <p className="muted" style={{ margin: "0 0 8px" }}><strong>Raw description:</strong> {String(provider.rawDescription || provider.description).slice(0, 500)}</p> : null}
                   <p style={{ margin: "0 0 8px" }}><strong>Normalized public name:</strong> {String(local?.publicName || quality.publicName)}</p>
                   <p className="muted" style={{ margin: "0 0 8px" }}><strong>Public variant:</strong> {quality.semantics.variant || "Standard"} · <strong>Target:</strong> {quality.semantics.target || "General"} · <strong>Region:</strong> {quality.semantics.region || "Not specified"}</p>

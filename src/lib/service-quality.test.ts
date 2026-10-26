@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { assertServiceOrderEligible, choosePreferredDuplicateServices, compactPublicServiceSemantics, complianceStatusForService, evaluateServiceQuality, expandPublicServiceSemantics, extractPublicServiceSemantics, matchesServiceSearch, normalizePublicServiceName, normalizeServiceCategory, priceStatusForService, publicServiceDescription, rankFeaturedServices, sanitizePublicCatalogCandidate, ServiceUnavailableError } from "./service-quality";
+import { assertServiceOrderEligible, choosePreferredDuplicateServices, compactPublicServiceSemantics, complianceStatusForService, evaluateServiceQuality, expandPublicServiceSemantics, extractPublicServiceSemantics, matchesServiceSearch, normalizePublicServiceName, normalizeServiceCategory, priceStatusForService, publicDisplayName, publicServiceDescription, rankFeaturedServices, sanitizePublicCatalogCandidate, ServiceUnavailableError } from "./service-quality";
 
 const valid = { name: "Instagram followers", category: "Instagram", min: 10, max: 10_000, rateMinor: 1250n, providerFunded: true };
 
@@ -79,6 +79,22 @@ describe("normalizePublicServiceName", () => {
   });
 });
 
+describe("publicDisplayName", () => {
+  it("preserves exact customer-relevant wording, casing and emoji mixes", () => {
+    expect(publicDisplayName("TG Mix Positive Reaction [👍😍🎉🔥❤️🥰👏] + Free View [Non Drop]"))
+      .toBe("TG Mix Positive Reaction [👍😍🎉🔥❤️🥰👏] + Free View [Non Drop]");
+    expect(publicDisplayName("TG Mix Negative Reaction [👎😬😢💩🤮😨🤯] + Free View [Instant / Non Drop]"))
+      .toBe("TG Mix Negative Reaction [👎😬😢💩🤮😨🤯] + Free View [Instant / Non Drop]");
+  });
+
+  it("decodes entities and removes only unsafe or private provider material", () => {
+    expect(publicDisplayName("Followspanel | TG Premium &amp; Normal Mix Positive Reaction [💯😍👏👍🎉🔥❤️] [Cheapest] | https://provider.example/service/12"))
+      .toBe("TG Premium & Normal Mix Positive Reaction [💯😍👏👍🎉🔥❤️] [Cheapest]");
+    expect(publicDisplayName("&lt;script&gt;alert(1)&lt;/script&gt; Instagram Views | support: support@example.test"))
+      .toBe("Instagram Views");
+  });
+});
+
 describe("public catalogue curation", () => {
   const base = { name: "Instagram Followers", category: "Instagram · Followers", min: 100, max: 10_000, type: "default", refill: true, cancel: false, featured: false };
   it("keeps the deterministic lower-price representative without deleting source records", () => {
@@ -103,6 +119,20 @@ describe("public catalogue curation", () => {
       { ...base, id: "heart", name: "Telegram Reactions", category: "Telegram · Reactions", semantics: { platform: "Telegram", kind: "Reactions", reactionEmojis: ["❤️"], linkType: "Post URL" }, rateMinor: 1500 },
     ];
     expect(choosePreferredDuplicateServices(services)).toHaveLength(2);
+  });
+
+  it("does not deduplicate distinct exact carrier titles with the same normalized semantics", () => {
+    const semantics = { platform: "Telegram", kind: "Reactions", reactionPolarity: "Positive" as const, linkType: "Post URL" };
+    const services = [
+      { ...base, id: "instant", name: "TG Positive Reaction [Instant]", category: "Telegram · Reactions", semantics, rateMinor: 1500 },
+      { ...base, id: "nondrop", name: "TG Positive Reaction [Non Drop]", category: "Telegram · Reactions", semantics, rateMinor: 1500 },
+    ];
+    expect(choosePreferredDuplicateServices(services)).toHaveLength(2);
+  });
+
+  it("uses the exact display title while retaining the normalized title separately", () => {
+    const candidate = sanitizePublicCatalogCandidate({ ...base, id: "exact", name: "Telegram Positive Reactions", publicDisplayName: "TG Mix Positive Reaction [Instant / Non Drop]", category: "Telegram", rateMinor: 1500 });
+    expect(candidate).toMatchObject({ name: "TG Mix Positive Reaction [Instant / Non Drop]", normalizedName: "Telegram Positive Reactions" });
   });
 });
 
