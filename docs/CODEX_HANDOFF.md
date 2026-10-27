@@ -425,3 +425,49 @@ Next steps stay intentionally small:
 2. Perform non-financial route/search/detail QA. Production will continue serving compatible v3 data until the next scheduled guarded provider sync publishes v4; do not manually trigger a provider sync merely for testing.
 3. After the scheduled migration, re-run the bounded egress audit and verify live positive, negative, mixed and emoji-specific Telegram searches and detail pages without placing an order.
 4. Observe Firestore billing and catalogue fallback alerts for seven normal days before considering any further catalogue-storage change.
+
+## Emergency order-tracking catch-up and fair scheduler — 27 October 2026
+
+The current production/GitHub baseline for this pass is `aa51d488d457684dceb41dde52e9c5d8f03a4f9c`. The implementation is committed locally as `5d4a382` (`Repair active order tracking scheduler`) and is designed to be released through the existing `socialbooster` Vercel project only.
+
+Architecture and verified progress:
+
+- `synchronizeActiveOrders()` is now the one bounded active-order sweeper used by the scheduled order job and the administrator's **Refresh live data** action. It scans only `pending`, `processing`, `in_progress` and `cancel_requested` orders, with deterministic `createdAt` plus document-ID pagination.
+- The page size is 100. The default run limit is 500 and can be reduced or raised with `ORDER_TRACKING_MAX_PER_RUN` (hard-clamped to 2,000). The persisted cursor wraps once and prevents duplicate work inside a run, so queues larger than one run rotate fairly instead of repeatedly checking the oldest orders.
+- Never-checked provider-backed orders are prioritized within the bounded sweep. Provider status requests remain grouped by provider and split into batches of at most 100 IDs. One provider/batch failure does not discard successful results from other batches.
+- Provider-confirmation recovery orders remain outside the active sweep. No recovery retry, new provider order, debit, payment or catalogue synchronization is performed by the sweeper.
+- A provider `Completed` response with `remains = 0` completes immediately even when `start_count` is absent. `Completed` with positive remains stays active. When both remains and start count are absent, two matching observations separated by the existing five-minute safety interval are required.
+- Partial delivery is persisted and shown immediately; any wallet refund still requires valid quantities, two matching terminal observations and the five-minute delay. A server-side guard blocks the generic refund action for active provider-backed orders.
+- `trackingHealth/current` is updated once per run with source, cursor, bounded workload, provider checks/failures, transitions, completion/partial counts, never-checked remainder, duration and an explicit Firestore read estimate. The administrator page displays this stored telemetry and does not call providers while rendering.
+- Administrator and customer order views now show delivered quantity. Active provider-backed rows offer **Verify live status** instead of a generic refund. Customer-facing pages remain white-labelled and do not expose provider identities.
+- Finance transition hooks and lifecycle/marketing completion hooks remain in the shared persistence path. Wallet idempotency, payment handling, provider submission, provider confirmation recovery, catalogue cache behavior, descriptions, exact service titles, Growth Enablement, referrals, GA4 and the true 40% gross-margin pricing formula were not changed.
+
+Bounded production read-only baseline at `2026-10-27T18:58:13.653Z`:
+
+- Active: 271 (`pending` 269, `in_progress` 2, `processing` 0).
+- Terminal/exception: completed 8, partial 0, failed 9.
+- Provider-confirmation recovery: 7; these records were read only and were not retried or modified.
+- Refund review: 0. This is an important pre-catch-up safeguard: no previously staged terminal observation can post a wallet refund during the authorized first catch-up.
+- Stored Finance reconciliation: `MATCH`, rollup version 2, last reconciled `2026-10-15T20:36:00.053Z`.
+
+Validation for implementation commit `5d4a382`:
+
+| Gate | Result |
+| --- | --- |
+| Full regression suite | Passed: 38 files / 221 tests |
+| Scheduler/status/refund regressions | Passed: deterministic 100-row pages, no order-101 gap, wrap/no duplicates, >500 rotation, <=100 provider batches, completion evidence and refund delay |
+| Firebase Rules | Passed: 3/3 within the full suite |
+| TypeScript | Passed: `tsc --noEmit` |
+| ESLint | Passed with zero warnings |
+| Production build | Passed: compilation, TypeScript, page-data collection and all 88 generated pages |
+| Production dependency audit | Passed: zero vulnerabilities |
+| Tracked-file secret scan | Passed |
+| Finance / pricing / growth / catalogue | Regression suites passed; production Finance remains `MATCH`; no architecture in these areas changed |
+| Real payment/order/referral/provider submission | Not performed by design |
+
+Remaining release steps, kept deliberately small:
+
+1. Commit this handoff update, push both commits to `origin/main`, and wait for the existing Vercel production deployment to become READY.
+2. Confirm the live administrator queue still reports zero refund reviews, then run exactly one authorized **Refresh live data** catch-up. This may read provider statuses and update local tracking/status fields only; it must not create a provider order, payment, debit or recovery retry.
+3. Record the live tracking-health result and post-catch-up status counts. Inspect recent Vercel runtime errors and confirm Finance reconciliation remains `MATCH`.
+4. Let subsequent scheduled runs rotate the persisted cursor. Observe tracking health and Firestore usage before making any further scheduler change.
