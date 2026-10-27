@@ -13,6 +13,17 @@ type RefundDecisionInput = {
 };
 
 export type RefundDecision = "none" | "stage" | "hold" | "confirm" | "reject";
+const activeProviderStatuses = new Set(["pending", "processing", "in_progress", "cancel_requested"]);
+
+export function genericActiveProviderRefundBlocked(status: unknown, providerOrderId: unknown) {
+  return activeProviderStatuses.has(String(status)) && Number.isSafeInteger(providerOrderId);
+}
+
+/** Partial delivery is visible immediately; only the wallet refund waits. */
+export function statusDuringRefundConfirmation(candidate: OrderStatus, previous: string, decision: RefundDecision) {
+  if (candidate === "partial") return "partial";
+  return ["stage", "hold", "reject"].includes(decision) ? previous : candidate;
+}
 
 export function remainingRefundAmount(originalChargeMinor: number, previousRefundsMinor: number[]) {
   if (!Number.isSafeInteger(originalChargeMinor) || originalChargeMinor <= 0) throw new Error("Invalid original charge");

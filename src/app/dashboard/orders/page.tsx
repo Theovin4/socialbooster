@@ -152,6 +152,7 @@ export default async function OrdersPage({
                   <th>Service</th>
                   <th>Start count</th>
                   <th>Quantity</th>
+                  <th>Delivered</th>
                   <th>Remaining</th>
                   <th>Charge</th>
                   <th>Status</th>
@@ -178,6 +179,7 @@ export default async function OrdersPage({
                       </td>
                       <td>{count(item.startCount)}</td>
                       <td>{count(item.quantity)}</td>
+                      <td>{tracking.delivered === null ? "Waiting" : tracking.delivered.toLocaleString("en-NG")}</td>
                       <td>
                         {String(item.status) === "completed"
                           ? "0"
@@ -229,6 +231,9 @@ export default async function OrdersPage({
                     </span>
                     <span>
                       Quantity<strong>{count(item.quantity)}</strong>
+                    </span>
+                    <span>
+                      Delivered<strong>{tracking.delivered === null ? "Waiting" : tracking.delivered.toLocaleString("en-NG")}</strong>
                     </span>
                     <span>
                       Remaining

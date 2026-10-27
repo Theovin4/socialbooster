@@ -2,7 +2,7 @@ import { timingSafeEqual } from "node:crypto";
 import { FieldValue, Timestamp } from "firebase-admin/firestore";
 import { adminDb } from "@/lib/firebase/admin";
 import { getProvider, normalizeProviderKey } from "@/lib/providers";
-import { synchronizeOrderDocuments } from "@/lib/order-sync";
+import { synchronizeActiveOrders } from "@/lib/active-order-sweeper";
 import { expireAwaitingCryptoDeposits, reverifyPendingCryptoDeposits } from "@/lib/payments/crypto-reconcile";
 import { createCustomerNotification } from "@/lib/customer-notifications";
 import { providerReviewAlertStage, providerReviewStageRank, type ProviderReviewAlertStage } from "@/lib/provider-review-policy";
@@ -14,13 +14,11 @@ export async function GET(request: Request) {
   if (!valid(request)) return Response.json({ error: "Unauthorized" }, { status: 401 });
   const db = adminDb();
   const reviewCutoff = Timestamp.fromMillis(Date.now() - 15 * 60 * 1000);
-  const [orderSnapshot, refillSnapshot, reviewSnapshot] = await Promise.all([
-    db.collection("orders").where("status", "in", ["pending", "processing", "in_progress", "cancel_requested"]).limit(100).get(),
+  const [orderResult, refillSnapshot, reviewSnapshot] = await Promise.all([
+    synchronizeActiveOrders({ source: "cron", force: true }),
     db.collection("refills").where("status", "in", ["pending", "processing"]).limit(100).get(),
     db.collection("orders").where("status", "==", "provider_confirmation_required").where("createdAt", "<=", reviewCutoff).orderBy("createdAt", "asc").limit(50).get(),
   ]);
-  const orders = orderSnapshot.docs.filter((doc) => Number.isInteger(doc.get("providerOrderId")));
-  const orderResult = await synchronizeOrderDocuments(orders, true);
   let refillsUpdated = 0;
 
   const refills = refillSnapshot.docs.filter((doc) => Number.isInteger(doc.get("providerRefillId")));
@@ -49,5 +47,5 @@ export async function GET(request: Request) {
     await sendAdminAlert({ subject: "Provider confirmation queue requires review", title: "Aged provider confirmations", message: `${reviewReminders} order(s) reached the review reminder and ${reviewEscalations} reached escalation. The job did not resubmit any provider order.`, buttonLabel: "Open recovery queue", buttonUrl: `${process.env.NEXT_PUBLIC_APP_URL || "https://www.socialbooster.net.ng"}/admin/provider`, idempotencyKey: `provider-review-cron-${dateBucket}-${reviewReminders}-${reviewEscalations}` }).catch(() => undefined);
   }
   const [crypto, expiredCrypto] = await Promise.all([reverifyPendingCryptoDeposits(), expireAwaitingCryptoDeposits()]);
-  return Response.json({ ok: true, updated: orderResult.updated, checked: orderResult.checked, refillsUpdated, refillsChecked: refills.length, providerReviews: { checked: reviewSnapshot.size, reminders: reviewReminders, escalations: reviewEscalations, resubmitted: 0 }, crypto, expiredCrypto });
+  return Response.json({ ok: true, tracking: orderResult, refillsUpdated, refillsChecked: refills.length, providerReviews: { checked: reviewSnapshot.size, reminders: reviewReminders, escalations: reviewEscalations, resubmitted: 0 }, crypto, expiredCrypto });
 }

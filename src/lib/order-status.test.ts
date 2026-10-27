@@ -8,8 +8,13 @@ describe("provider status mapping", () => {
 });
 
 describe("verified provider completion", () => {
-  it("does not complete without a start count", () => expect(verifiedProviderStatus("Completed", null, 0)).toBe("processing"));
+  it("completes with zero remaining even when start count is absent", () => expect(verifiedProviderStatus("Completed", null, 0)).toBe("completed"));
   it("does not complete while units remain", () => expect(verifiedProviderStatus("Completed", 517, 499)).toBe("processing"));
   it("accepts completion only with numeric evidence", () => expect(verifiedProviderStatus("Completed", 517, 0)).toBe("completed"));
-  it("does not falsely complete a malformed response", () => expect(verifiedProviderStatus("Complete", 517, null)).toBe("processing"));
+  it("accepts provider completion when a valid start count is the available quantity evidence", () => expect(verifiedProviderStatus("Complete", 517, null)).toBe("completed"));
+  it("requires two separated matching observations when both quantities are absent", () => {
+    expect(verifiedProviderStatus("Completed", null, null, { nowMs: 1_000_000 })).toBe("processing");
+    expect(verifiedProviderStatus("Completed", null, null, { previousObservation: "completed", firstObservedAtMs: 1_000_000, nowMs: 1_000_001 })).toBe("processing");
+    expect(verifiedProviderStatus("Completed", null, null, { previousObservation: "completed", firstObservedAtMs: 1_000_000, nowMs: 1_300_000 })).toBe("completed");
+  });
 });

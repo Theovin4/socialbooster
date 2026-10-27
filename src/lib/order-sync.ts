@@ -3,16 +3,17 @@ import { adminDb } from "./firebase/admin";
 import { postWallet } from "./firebase/wallet";
 import { serviceCostMinor } from "./money";
 import { getProvider, normalizeProviderKey } from "./providers";
-import { verifiedProviderStatus } from "./order-status";
+import { mapProviderStatus, verifiedProviderStatus } from "./order-status";
 import { sendUserEmail } from "./email";
 import { orderStatusEmailCopy, shouldSendOrderStatusEmail } from "./order-email-policy";
-import { remainingRefundAmount, terminalRefundDecision } from "./order-refund-policy";
+import { remainingRefundAmount, statusDuringRefundConfirmation, terminalRefundDecision } from "./order-refund-policy";
 import { recordCompletedOrderMarketing } from "./marketing-profile";
 import { recordFinanceOrderStatus } from "./firebase/analytics-rollups";
 import { lagosDateKey } from "./firebase/stats";
 import { createCustomerNotification } from "./customer-notifications";
 import { providerConfirmationRefundKeys } from "./provider-confirmation-recovery";
 import { nonNegativeInteger, orderProgress } from "./order-tracking";
+import { boundedBatches } from "./active-order-pages";
 
 const STALE_AFTER_MS = 60_000;
 const PROVIDER_STATUS_BATCH_SIZE = 100;
@@ -27,6 +28,18 @@ export type ProviderStatusResult = {
 
 export type PrefetchedProviderStatuses = Map<string, Record<string, ProviderStatusResult>>;
 
+export type OrderSynchronizationResult = {
+  checked: number;
+  attempted: number;
+  updated: number;
+  providerBatches: number;
+  providerFailures: number;
+  checkedByProvider: Record<string, number>;
+  transitions: Record<string, number>;
+  processedOrderIds: string[];
+  statusByOrder: Record<string, string>;
+};
+
 /** Shared provider-status persistence for cron, admin, customer and recovery paths. */
 export async function synchronizeOrderDocuments(
   documents: DocumentSnapshot[],
@@ -40,7 +53,7 @@ export async function synchronizeOrderDocuments(
     const updated = doc.get("lastProviderUpdate")?.toMillis?.() || 0;
     return now - updated >= STALE_AFTER_MS;
   });
-  if (!eligible.length) return { checked: 0, updated: 0 };
+  if (!eligible.length) return { checked: 0, attempted: 0, updated: 0, providerBatches: 0, providerFailures: 0, checkedByProvider: {}, transitions: {}, processedOrderIds: [], statusByOrder: {} } satisfies OrderSynchronizationResult;
 
   const db = adminDb();
   const grouped = new Map<string, DocumentSnapshot[]>();
@@ -50,6 +63,7 @@ export async function synchronizeOrderDocuments(
   }
 
   const statusesByProvider = new Map<string, Record<string, ProviderStatusResult>>();
+  let providerBatches = 0, providerFailures = 0;
   await Promise.all(Array.from(grouped.entries()).map(async ([key, docs]) => {
     const supplied = prefetchedStatuses?.get(key) || {};
     const missingIds = docs
@@ -58,38 +72,51 @@ export async function synchronizeOrderDocuments(
     const provider = getProvider(key);
     if (!provider.configured && missingIds.length) {
       console.warn("[order-sync] provider not configured", { providerKey: key, orderCount: missingIds.length });
+      providerFailures += 1;
       if (Object.keys(supplied).length) statusesByProvider.set(key, supplied);
       return;
     }
-    try {
-      const batches: Array<Record<string, ProviderStatusResult>> = [];
-      for (let offset = 0; offset < missingIds.length; offset += PROVIDER_STATUS_BATCH_SIZE) {
-        batches.push(await provider.client.statuses(missingIds.slice(offset, offset + PROVIDER_STATUS_BATCH_SIZE)));
+    const combined: Record<string, ProviderStatusResult> = { ...supplied };
+    for (const ids of boundedBatches(missingIds, PROVIDER_STATUS_BATCH_SIZE)) {
+      providerBatches += 1;
+      try {
+        Object.assign(combined, await provider.client.statuses(ids));
+      } catch (error) {
+        providerFailures += 1;
+        console.error("[order-sync] provider status batch failed", { providerKey: key, orderCount: ids.length, error: error instanceof Error ? error.message : String(error) });
       }
-      statusesByProvider.set(key, Object.assign({}, supplied, ...batches));
-    } catch (error) {
-      console.error("[order-sync] provider status failed", { providerKey: key, orderCount: missingIds.length, error: error instanceof Error ? error.message : String(error) });
-      if (Object.keys(supplied).length) statusesByProvider.set(key, supplied);
     }
+    if (Object.keys(combined).length) statusesByProvider.set(key, combined);
   }));
 
-  let updated = 0;
+  let checked = 0, updated = 0;
+  const checkedByProvider: Record<string, number> = {};
+  const transitions: Record<string, number> = {};
+  const processedOrderIds: string[] = [];
+  const statusByOrder: Record<string, string> = {};
   for (const doc of eligible) {
     const providerKey = normalizeProviderKey(doc.get("providerKey"));
     const providerOrderId = Number(doc.get("providerOrderId"));
     const provider = statusesByProvider.get(providerKey)?.[String(providerOrderId)];
     if (!provider) continue;
+    checked += 1;
+    checkedByProvider[providerKey] = (checkedByProvider[providerKey] || 0) + 1;
 
     const startCount = nonNegativeInteger(provider.start_count);
     const remains = nonNegativeInteger(provider.remains);
-    const candidateStatus = verifiedProviderStatus(provider.status, startCount, remains);
+    const completionFirstSeenAtMs = doc.get("completionReviewFirstSeenAt")?.toMillis?.() || null;
+    const candidateStatus = verifiedProviderStatus(provider.status, startCount, remains, {
+      previousObservation: doc.get("completionReviewStatus") || null,
+      firstObservedAtMs: completionFirstSeenAtMs,
+      nowMs: now,
+    });
     const previous = String(doc.get("status") || "pending");
     const quantity = nonNegativeInteger(doc.get("quantity")) || 0;
     const firstObservedAtMs = doc.get("refundReviewFirstSeenAt")?.toMillis?.() || null;
     const refundDecision = doc.get("refundStatus") === "posted"
       ? "none"
       : terminalRefundDecision({ status: candidateStatus, quantity, remains, previousObservation: doc.get("refundReviewStatus") || null, firstObservedAtMs, nowMs: now });
-    const status = ["stage", "hold", "reject"].includes(refundDecision) ? previous : candidateStatus;
+    const status = statusDuringRefundConfirmation(candidateStatus, previous, refundDecision);
     const effectiveRemains = remains ?? nonNegativeInteger(doc.get("remains"));
     const progress = orderProgress({ quantity, remains: effectiveRemains, status });
     console.info("[order-sync] provider status", { orderId: doc.id, providerKey, providerOrderId, providerStatus: provider.status, resolvedStatus: candidateStatus, persistedStatus: status, refundDecision, startCount, remains });
@@ -101,6 +128,10 @@ export async function synchronizeOrderDocuments(
       lastProviderUpdate: FieldValue.serverTimestamp(),
       updatedAt: FieldValue.serverTimestamp(),
     };
+    const needsCompletionConfirmation = mapProviderStatus(provider.status) === "completed" && startCount === null && remains === null && candidateStatus !== "completed";
+    if (needsCompletionConfirmation && doc.get("completionReviewStatus") !== "completed") Object.assign(update, { completionReviewStatus: "completed", completionReviewFirstSeenAt: FieldValue.serverTimestamp(), completionReviewConfirmations: 1 });
+    else if (needsCompletionConfirmation) update.completionReviewConfirmations = FieldValue.increment(1);
+    else Object.assign(update, { completionReviewStatus: FieldValue.delete(), completionReviewFirstSeenAt: FieldValue.delete(), completionReviewConfirmations: FieldValue.delete() });
     if (progress.delivered !== null) update.deliveredQuantity = progress.delivered;
     if (progress.percent !== null) update.progressPercent = progress.percent;
     if (refundDecision === "stage") Object.assign(update, { refundReviewStatus: candidateStatus, refundReviewFirstSeenAt: FieldValue.serverTimestamp(), refundReviewConfirmations: 1, refundStatus: "pending_confirmation", refundableQuantity: candidateStatus === "partial" ? remains : quantity });
@@ -124,6 +155,7 @@ export async function synchronizeOrderDocuments(
       });
       if (!transition.duplicate) {
         updated += 1;
+        transitions[`${previous}->${status}`] = (transitions[`${previous}->${status}`] || 0) + 1;
         await db.collection("orderEvents").add({ orderId: doc.id, userId: doc.get("userId"), status, previousStatus: previous, createdAt: FieldValue.serverTimestamp() });
         await createCustomerNotification({ userId: doc.get("userId"), type: "order_status", title: `Order ${status.replaceAll("_", " ")}`, orderId: doc.id });
         const routineEmailCount = Number(doc.get("customerRoutineEmailCount") || 0);
@@ -136,6 +168,8 @@ export async function synchronizeOrderDocuments(
     } else {
       await doc.ref.set(update, { merge: true });
     }
+    processedOrderIds.push(doc.id);
+    statusByOrder[doc.id] = status;
 
     if (["stage", "reject"].includes(refundDecision)) await db.collection("auditLogs").add({ action: refundDecision === "stage" ? "order_refund_staged" : "order_refund_evidence_rejected", targetType: "order", targetId: doc.id, providerKey, providerOrderId, candidateStatus, startCount, remains, quantity, createdAt: FieldValue.serverTimestamp() });
     if (refundDecision === "confirm") {
@@ -164,5 +198,5 @@ export async function synchronizeOrderDocuments(
       }
     }
   }
-  return { checked: eligible.length, updated };
+  return { checked, attempted: eligible.length, updated, providerBatches, providerFailures, checkedByProvider, transitions, processedOrderIds, statusByOrder } satisfies OrderSynchronizationResult;
 }

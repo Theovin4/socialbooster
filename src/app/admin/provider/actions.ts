@@ -8,7 +8,7 @@ import { adminDb } from "@/lib/firebase/admin";
 import { postWallet } from "@/lib/firebase/wallet";
 import { requireAdmin } from "@/lib/firebase/session";
 import { getProvider, normalizeProviderKey } from "@/lib/providers";
-import { remainingRefundAmount } from "@/lib/order-refund-policy";
+import { genericActiveProviderRefundBlocked, remainingRefundAmount } from "@/lib/order-refund-policy";
 import { recordFinanceOrderStatus, recordFinanceProviderAccepted } from "@/lib/firebase/analytics-rollups";
 import { lagosDateKey } from "@/lib/firebase/stats";
 import { createCustomerNotificationOnce } from "@/lib/customer-notifications";
@@ -16,6 +16,7 @@ import { classifySubmissionError, safeSubmissionDiagnostics } from "@/lib/order-
 import { providerAcceptsNewOrders, recordAmbiguousProviderSubmission } from "@/lib/provider-order-health";
 import { sendAdminAlert } from "@/lib/email";
 import { synchronizeOrderDocuments, type PrefetchedProviderStatuses } from "@/lib/order-sync";
+import { synchronizeActiveOrders } from "@/lib/active-order-sweeper";
 import {
   providerConfirmationClaimMatches,
   providerConfirmationRecoveryState,
@@ -134,14 +135,7 @@ async function refundAndCloseProviderConfirmation(input: { orderId: string; orde
 
 export async function refreshLiveOrders() {
   await requireAdmin();
-  const snapshot = await adminDb().collection("orders")
-    .where("status", "in", ["pending", "processing", "in_progress", "cancel_requested"])
-    .limit(100)
-    .get();
-  await synchronizeOrderDocuments(
-    snapshot.docs.filter((doc) => Number.isInteger(doc.get("providerOrderId"))),
-    true,
-  );
+  await synchronizeActiveOrders({ source: "admin", force: true });
   revalidatePath("/admin/provider");
   revalidatePath("/dashboard/orders");
 }
@@ -154,6 +148,9 @@ export async function refundOrder(formData: FormData) {
   const order = await ref.get();
   if (!order.exists) throw new Error("Order not found");
   if (order.get("status") === "provider_confirmation_required") throw new Error("Resolve provider confirmation before issuing a refund");
+  if (genericActiveProviderRefundBlocked(order.get("status"), order.get("providerOrderId"))) {
+    throw new Error("Refresh and verify the live provider status before using an exception refund workflow");
+  }
   const charge = Number(order.get("customerPriceMinor"));
   if (!Number.isSafeInteger(charge) || charge <= 0) throw new Error("Order charge is invalid");
   if (order.get("status") === "refunded" && Number(order.get("refundedAmountMinor") || 0) >= charge) return;
@@ -178,6 +175,17 @@ export async function refundOrder(formData: FormData) {
   revalidatePath("/dashboard/orders");
   revalidatePath("/dashboard/wallet");
   revalidatePath("/dashboard/transactions");
+}
+
+export async function refreshOrder(formData: FormData) {
+  await requireAdmin();
+  const orderId = z.string().uuid().parse(formData.get("orderId"));
+  const snapshot = await adminDb().collection("orders").doc(orderId).get();
+  if (!snapshot.exists) throw new Error("Order not found");
+  if (!Number.isInteger(snapshot.get("providerOrderId"))) throw new Error("This order has no confirmed provider order to verify");
+  await synchronizeOrderDocuments([snapshot], true);
+  revalidatePath("/admin/provider");
+  revalidatePath(`/dashboard/orders/${orderId}`);
 }
 
 export async function confirmProviderAccepted(formData: FormData) {
