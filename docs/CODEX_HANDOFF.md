@@ -465,9 +465,31 @@ Validation for implementation commit `5d4a382`:
 | Finance / pricing / growth / catalogue | Regression suites passed; production Finance remains `MATCH`; no architecture in these areas changed |
 | Real payment/order/referral/provider submission | Not performed by design |
 
-Remaining release steps, kept deliberately small:
+Production release and catch-up outcome — 28 October 2026:
 
-1. Commit this handoff update, push both commits to `origin/main`, and wait for the existing Vercel production deployment to become READY.
-2. Confirm the live administrator queue still reports zero refund reviews, then run exactly one authorized **Refresh live data** catch-up. This may read provider statuses and update local tracking/status fields only; it must not create a provider order, payment, debit or recovery retry.
-3. Record the live tracking-health result and post-catch-up status counts. Inspect recent Vercel runtime errors and confirm Finance reconciliation remains `MATCH`.
-4. Let subsequent scheduled runs rotate the persisted cursor. Observe tracking health and Firestore usage before making any further scheduler change.
+- Scheduler commit `5d4a382`, handoff commit `3e06558` and the confirmed Followpanel bulk-status compatibility fix `9a6a697` were pushed to `origin/main`. Existing Vercel project `socialbooster` deployed exact commit `9a6a697d65191178aaa211d89739d97b08f95a4a` as `dpl_B7PDnYjNLS7uQKZfRhvEixQvSy87`; it reached `READY` and retained the existing production aliases.
+- The first production pass proved the shared scheduler but exposed that Followpanel returns numeric `start_count`, `remains` and `charge` fields. The client previously accepted strings only and silently discarded those otherwise valid bulk records. Commit `9a6a697` safely coerces those scalar fields to strings and turns a nonempty but wholly unsupported bulk response into an explicit `INVALID_STATUS` provider failure. No finance, price, submission or wallet path changed.
+- Immediately before the authorized parser-fixed catch-up, refund review was zero. Exactly one administrator **Refresh live data** sweep was started. It discovered 270 active orders, checked 269 provider-backed orders, updated 264 statuses, detected 252 completions and 12 partial deliveries, made four provider-status batches, had zero provider failures and left zero never-checked orders. Provider checks were Followpanel 268, Nitro NG 0 and SMM World 1. Runtime was 258,021 ms.
+- Post-catch-up live totals were completed 262, partial 12, pending 3, processing 0, in progress 2, provider-confirmation-required 7 and failed 9. Five first-observation candidates are held in refund review. No second sweep was triggered because doing so could satisfy the terminal-observation delay and post a wallet refund; those records require intentional review after the safety interval.
+- The seven provider-confirmation records remain isolated from the sweeper: six Followpanel and one Nitro NG. They were not retried, attached, refunded or resubmitted. No real payment, provider order, referral reward, recovery retry or manual catalogue synchronization was performed.
+- The final bounded production audit at `2026-10-28T18:07:15.511Z` reported Finance reconciliation `MATCH`, rollup version 2. The production routes `/`, `/services`, `/pricing`, `/admin/login` (expected redirect to `/login`), `/robots.txt` and `/sitemap.xml` all returned HTTP 200. Vercel's one-hour runtime-error view reported no errors, and the exact deployment had no error, warning or fatal entries in the available 30-minute Hobby-plan log window.
+
+Final validation for parser-fix commit `9a6a697`:
+
+| Gate | Result |
+| --- | --- |
+| Full regression suite | Passed: 38 files / 223 tests |
+| Followpanel provider suite | Passed: 13/13, including numeric bulk fields and unsupported-payload failure |
+| Firebase Rules | Passed: 3/3 within the full suite |
+| TypeScript | Passed: `tsc --noEmit` |
+| ESLint | Passed with zero warnings |
+| Production build | Passed: compilation, TypeScript, page-data collection and all 88 generated pages |
+| Production dependency audit | Passed: zero vulnerabilities |
+| Tracked-source secret scan / diff check | Passed |
+| Finance / 40% margin / growth / Firebase optimization | Regression suites passed; production Finance remains `MATCH`; none of these architectures changed |
+
+Next work, intentionally split into small operational phases:
+
+1. Review the five refund-review records individually. Do not run another bulk catch-up merely to test; a second matching terminal observation may post the calculated wallet refund.
+2. Reconcile the seven provider-confirmation records one at a time against the upstream provider dashboards. Never retry unless an administrator verifies that no upstream order exists.
+3. Observe normal scheduled tracking, Firestore reads/egress and Vercel runtime errors for seven days. Escalate only persistent provider failures or an increasing never-checked count.
