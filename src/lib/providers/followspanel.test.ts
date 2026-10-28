@@ -70,6 +70,21 @@ describe("FollowsPanelClient", () => {
     expect(statuses).toEqual({ "101": { status: "In progress", start_count: "517", remains: "120" } });
   });
 
+  it("normalizes numeric fields in bulk live order statuses", async () => {
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(new Response(JSON.stringify({
+      "101": { status: "Completed", start_count: 517, remains: 0, charge: 1.25 },
+    }), { status: 200 })));
+    const statuses = await new FollowsPanelClient("https://provider.test", "secret").statuses([101]);
+    expect(statuses).toEqual({ "101": { status: "Completed", start_count: "517", remains: "0", charge: "1.25" } });
+  });
+
+  it("reports an unsupported bulk status payload instead of a false successful check", async () => {
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(new Response(JSON.stringify({
+      "101": { order_status: "Completed", remaining: 0 },
+    }), { status: 200 })));
+    await expect(new FollowsPanelClient("https://provider.test", "secret").statuses([101])).rejects.toMatchObject({ code: "INVALID_STATUS" });
+  });
+
   it("recognizes an accepted cancellation response", async () => {
     vi.stubGlobal("fetch", vi.fn().mockResolvedValue(new Response(JSON.stringify([{ order: 101, cancel: true }]), { status: 200 })));
     const result = await new FollowsPanelClient("https://provider.test", "secret").cancel([101]);

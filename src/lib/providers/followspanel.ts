@@ -55,7 +55,13 @@ const serviceSchema = z.preprocess((value) => {
   refill: booleanFlag,
   cancel: booleanFlag,
 }).refine((value) => value.max >= value.min, "Maximum must be greater than or equal to minimum"));
-const statusSchema = z.object({ charge: z.string().optional(), start_count: z.string().optional(), status: z.string(), remains: z.string().optional(), currency: z.string().optional() });
+const statusSchema = z.object({
+  charge: z.coerce.string().optional(),
+  start_count: z.coerce.string().optional(),
+  status: z.string(),
+  remains: z.coerce.string().optional(),
+  currency: z.string().optional(),
+});
 const refillSchema = z.object({ refill: z.coerce.number().int().positive() });
 const refillStatusSchema = z.object({ status: z.string().min(1) });
 const multipleRefillSchema = z.union([
@@ -140,6 +146,7 @@ export class FollowsPanelClient {
   statuses(ids: number[]) { return this.post("status", { orders: ids.join(",") }).then((data) => {
     const source = z.record(z.string(), z.unknown()).parse(data), valid: Record<string, z.infer<typeof statusSchema>> = {};
     for (const [id, value] of Object.entries(source)) { const parsed = statusSchema.safeParse(value); if (parsed.success) valid[id] = parsed.data; }
+    if (Object.keys(source).length && !Object.keys(valid).length) throw new ProviderError("The provider status format is not supported", "INVALID_STATUS");
     return valid;
   }); }
   refill(orderId: number) { return this.post("refill", { order: String(orderId) }, false).then((data) => refillSchema.parse(data)); }
