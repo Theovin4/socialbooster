@@ -1,5 +1,7 @@
 import { publicSiteUrl, urlSet, xmlResponse } from "@/lib/sitemap-xml";
 
+export const dynamic = "force-static";
+
 const updated = "2026-10-12";
 const paths = ["", "/services", "/pricing", "/payments", "/payments/crypto", "/resellers", "/api-docs", "/how-it-works", "/blog", "/about", "/editorial-policy", "/contact", "/faq", "/terms", "/privacy", "/refund-policy", "/acceptable-use", "/cookie-policy"];
 

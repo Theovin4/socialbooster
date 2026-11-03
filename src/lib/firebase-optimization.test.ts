@@ -47,6 +47,49 @@ describe("Firebase optimization architecture", () => {
     expect(sync).toContain("providerSnapshotHashes");
   });
 
+  it("short-circuits unchanged catalogues before CPU-heavy quality evaluation", () => {
+    const sync = readFileSync(new URL("./services-sync.ts", import.meta.url), "utf8");
+    const unchanged = sync.indexOf("lock.state.catalogueHash === catalogueHash");
+    const qualityEvaluation = sync.indexOf("const qualityById = new Map");
+    expect(unchanged).toBeGreaterThan(0);
+    expect(qualityEvaluation).toBeGreaterThan(unchanged);
+    expect(sync.slice(unchanged, qualityEvaluation)).toContain("lock.state.qualitySummary");
+    expect(sync).toContain("MAX_PROVIDER_SERVICE_ROWS = 20_000");
+    expect(sync).toContain("rows.length > MAX_PROVIDER_SERVICE_ROWS");
+  });
+
+  it("serves public detail and pricing pages through ISR while private routes remain dynamic", () => {
+    const detail = readFileSync(new URL("../app/services/[id]/page.tsx", import.meta.url), "utf8");
+    const pricing = readFileSync(new URL("../app/pricing/page.tsx", import.meta.url), "utf8");
+    const wallet = readFileSync(new URL("../app/dashboard/wallet/page.tsx", import.meta.url), "utf8");
+    expect(detail).toContain("export const revalidate = 86_400");
+    expect(detail).toContain("generateStaticParams");
+    expect(pricing).toContain("export const revalidate = 3_600");
+    expect(wallet).toContain('export const dynamic = "force-dynamic"');
+  });
+
+  it("CDN-caches the public catalogue without caching private or financial routes", () => {
+    const config = readFileSync(new URL("../../next.config.ts", import.meta.url), "utf8");
+    const api = readFileSync(new URL("../app/api/public/services/route.ts", import.meta.url), "utf8");
+    expect(config).toContain('{source:"/services"');
+    expect(config).toContain('Vercel-CDN-Cache-Control');
+    expect(config).not.toContain('{source:"/dashboard');
+    expect(config).not.toContain('{source:"/api/payments');
+    expect(api).toContain('s-maxage=300');
+    expect(api).toContain('unsupportedParameters');
+  });
+
+  it("prerenders public metadata and service-detail endpoints instead of invoking functions per request", () => {
+    const detailsEndpoint = readFileSync(new URL("../app/api/public/services/[id]/details/route.ts", import.meta.url), "utf8");
+    const serviceSitemap = readFileSync(new URL("../app/sitemap-services.xml/route.ts", import.meta.url), "utf8");
+    const staticSitemap = readFileSync(new URL("../app/sitemap-pages.xml/route.ts", import.meta.url), "utf8");
+    expect(detailsEndpoint).toContain('dynamic = "force-static"');
+    expect(detailsEndpoint).toContain("revalidate = 300");
+    expect(serviceSitemap).toContain('dynamic = "force-static"');
+    expect(serviceSitemap).toContain("revalidate = 3_600");
+    expect(staticSitemap).toContain('dynamic = "force-static"');
+  });
+
   it("derives repeated service descriptions instead of storing them in snapshot rows", () => {
     const snapshot = readFileSync(new URL("./public-catalog-snapshot.ts", import.meta.url), "utf8");
     const sync = readFileSync(new URL("./services-sync.ts", import.meta.url), "utf8");
@@ -63,10 +106,24 @@ describe("Firebase optimization architecture", () => {
     expect(snapshot).not.toContain('collection("services")');
   });
 
-  it("resolves service detail pages without a direct Firestore read", () => {
+  it("resolves service detail pages with a bounded public-safe lookup instead of rebuilding the catalogue", () => {
     const page = readFileSync(new URL("../app/services/[id]/page.tsx", import.meta.url), "utf8");
-    expect(page).toContain("resolveServiceIdentifier");
+    const details = readFileSync(new URL("./public-service-details.ts", import.meta.url), "utf8");
+    expect(page).toContain("getPublicServicePage");
     expect(page).not.toContain("adminDb");
+    expect(details).toContain('.where("publicId", "==", publicId).limit(2)');
+    expect(details).toContain('.collection("services").doc(internalId).get()');
+    expect(details).not.toContain('providerKey: document.get');
+    expect(details).not.toContain('providerServiceId: document.get');
+    expect(details).not.toContain('providerRateMinor: document.get');
+  });
+
+  it("invalidates the changed public service page when provider details change", () => {
+    const cron = readFileSync(new URL("../app/api/cron/services/route.ts", import.meta.url), "utf8");
+    const details = readFileSync(new URL("./public-service-details.ts", import.meta.url), "utf8");
+    expect(details).toContain('publicServicePageTag(publicId)');
+    expect(cron).toContain("publicServicePageTag(publicServiceId(id))");
+    expect(cron).toContain("revalidateTag(publicServiceDetailsTag(id), \"max\")");
   });
 
   it("loads and caches one full description without expanding catalogue payloads", () => {
@@ -77,7 +134,7 @@ describe("Firebase optimization architecture", () => {
     expect(details).toContain("unstable_cache");
     expect(details).toContain('collection("publicServiceDetails").doc(service.internalId).get()');
     expect(details).not.toContain(".listDocuments(");
-    expect(endpoint).toContain("/^SB-[A-F0-9]{16}$/");
+    expect(endpoint).toContain("getPublicServicePage");
     expect(orderPage).not.toContain("fullDescription:");
     expect(orderForm).toContain("/api/public/services/${encodeURIComponent(serviceId)}/details");
     expect(orderForm).toContain('detailsStatus !== "ready"');

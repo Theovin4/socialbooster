@@ -1,7 +1,8 @@
 import { getSeoEligibleServiceCatalog } from "@/lib/service-catalog";
 import { publicSiteUrl, urlSet, xmlResponse } from "@/lib/sitemap-xml";
 
-export const dynamic = "force-dynamic";
+export const dynamic = "force-static";
+export const revalidate = 3_600;
 
 export async function GET() {
   try {

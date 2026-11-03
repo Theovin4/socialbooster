@@ -5,14 +5,16 @@ import { cache } from "react";
 import { SiteFooter } from "@/components/site-footer";
 import { SiteHeader } from "@/components/site-header";
 import { formatMoney } from "@/lib/money";
-import { getPublicServiceDetails } from "@/lib/public-service-details";
-import { resolveServiceIdentifier } from "@/lib/service-catalog";
+import { getPublicServicePage } from "@/lib/public-service-details";
 
-export const dynamic = "force-dynamic";
+// Public service pages contain no customer-specific data. Generate each service
+// on first request, then serve it from ISR until the catalogue tag changes.
+export const revalidate = 86_400;
+export async function generateStaticParams() { return []; }
 const getService = cache(async (identifier: string) => {
-  const match = await resolveServiceIdentifier(identifier);
-  if (!match) return null;
-  const details = await getPublicServiceDetails(match);
+  const result = await getPublicServicePage(identifier);
+  if (!result) return null;
+  const { service: match, details } = result;
   return {
     service: {
       name: match.name,

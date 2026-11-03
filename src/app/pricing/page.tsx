@@ -5,7 +5,9 @@ import { SiteFooter } from "@/components/site-footer";
 import { PricingEstimator, type PricingService } from "@/components/pricing-estimator";
 import { getServiceCatalogPage } from "@/lib/service-catalog";
 
-export const dynamic = "force-dynamic";
+// Pricing examples are public and sourced from the tagged catalogue cache.
+// ISR removes per-visitor rendering while preserving regular refreshes.
+export const revalidate = 3_600;
 export const metadata: Metadata = {
   title: "Social Media Service Pricing & Order Calculator",
   description: "Estimate current social media service costs, compare order limits, and understand wallet payments, refills and cancellation options before ordering.",

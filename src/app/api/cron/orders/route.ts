@@ -7,11 +7,13 @@ import { expireAwaitingCryptoDeposits, reverifyPendingCryptoDeposits } from "@/l
 import { createCustomerNotification } from "@/lib/customer-notifications";
 import { providerReviewAlertStage, providerReviewStageRank, type ProviderReviewAlertStage } from "@/lib/provider-review-policy";
 import { sendAdminAlert } from "@/lib/email";
+import { finishFunctionTiming, startFunctionTiming } from "@/lib/function-timing";
 
 function valid(request: Request) { const expected = process.env.CRON_SECRET || "", supplied = request.headers.get("authorization")?.replace(/^Bearer /, "") || ""; return expected.length === supplied.length && expected.length > 0 && timingSafeEqual(Buffer.from(expected), Buffer.from(supplied)); }
 
 export async function GET(request: Request) {
   if (!valid(request)) return Response.json({ error: "Unauthorized" }, { status: 401 });
+  const timingStart = startFunctionTiming();
   const db = adminDb();
   const reviewCutoff = Timestamp.fromMillis(Date.now() - 15 * 60 * 1000);
   const [orderResult, refillSnapshot, reviewSnapshot] = await Promise.all([
@@ -47,5 +49,7 @@ export async function GET(request: Request) {
     await sendAdminAlert({ subject: "Provider confirmation queue requires review", title: "Aged provider confirmations", message: `${reviewReminders} order(s) reached the review reminder and ${reviewEscalations} reached escalation. The job did not resubmit any provider order.`, buttonLabel: "Open recovery queue", buttonUrl: `${process.env.NEXT_PUBLIC_APP_URL || "https://www.socialbooster.net.ng"}/admin/provider`, idempotencyKey: `provider-review-cron-${dateBucket}-${reviewReminders}-${reviewEscalations}` }).catch(() => undefined);
   }
   const [crypto, expiredCrypto] = await Promise.all([reverifyPendingCryptoDeposits(), expireAwaitingCryptoDeposits()]);
-  return Response.json({ ok: true, tracking: orderResult, refillsUpdated, refillsChecked: refills.length, providerReviews: { checked: reviewSnapshot.size, reminders: reviewReminders, escalations: reviewEscalations, resubmitted: 0 }, crypto, expiredCrypto });
+  const timing = finishFunctionTiming(timingStart);
+  console.info("[cron:orders] complete", timing);
+  return Response.json({ ok: true, tracking: orderResult, refillsUpdated, refillsChecked: refills.length, providerReviews: { checked: reviewSnapshot.size, reminders: reviewReminders, escalations: reviewEscalations, resubmitted: 0 }, crypto, expiredCrypto, timing });
 }

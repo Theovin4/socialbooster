@@ -13,6 +13,7 @@ import { buildPublicServiceDetails } from "./service-description";
 const FINGERPRINT_VERSION = 1;
 const QUALITY_RULESET_VERSION = 4;
 const FINGERPRINT_CHUNK_SIZE = 500;
+const MAX_PROVIDER_SERVICE_ROWS = 20_000;
 const MANUAL_SYNC_COOLDOWN_MS = 5 * 60 * 1000;
 const SYNC_LOCK_MS = 10 * 60 * 1000;
 
@@ -183,7 +184,7 @@ export async function synchronizeProviderServices(providerKey: ProviderDefinitio
   const startedAt = Date.now(), lock = await acquireSyncLock(provider.key, trigger);
   try {
     const [rows, balance] = await Promise.all([provider.client.services(), provider.client.balance()]);
-    if (rows.length > 20_000) console.warn("[services:sync] unusually large catalogue", { provider: providerKey, serviceCount: rows.length });
+    if (rows.length > MAX_PROVIDER_SERVICE_ROWS) throw new Error(`${provider.label} returned more than ${MAX_PROVIDER_SERVICE_ROWS.toLocaleString("en-NG")} services`);
     const reportedCurrency = String(balance.currency || provider.currency).trim().toUpperCase();
     if (reportedCurrency !== "NGN" && reportedCurrency !== "USD") throw new Error(`${provider.label} returned an unsupported account currency`);
     const providerCurrency: "NGN" | "USD" = reportedCurrency;
@@ -197,30 +198,50 @@ export async function synchronizeProviderServices(providerKey: ProviderDefinitio
       const fingerprint = hashRecord({ ...providerData, providerFunded, grossMarginTargetBps: Number(grossMarginTargetBps), usdToNgn: String(usdToNgn) });
       return { id, item, providerData, providerRateNgnMinor, nativeRateMinor, fingerprint };
     });
-    const qualityById = new Map(normalized.map((row) => {
-      const sellingRateMinor = sellingPriceForGrossMarginMinor(row.providerRateNgnMinor, grossMarginTargetBps);
-      return [row.id, evaluateServiceQuality({ name: row.item.name, category: row.item.category, description: "description" in row.item ? row.item.description || "" : "", min: row.item.min, max: row.item.max, rateMinor: row.providerRateNgnMinor, sellingRateMinor, providerFunded, type: row.item.type, refill: row.item.refill, cancel: row.item.cancel })] as const;
-    }));
-    const duplicateCounts = new Map<string, number>();
-    for (const quality of qualityById.values()) duplicateCounts.set(quality.duplicateGroupKey, (duplicateCounts.get(quality.duplicateGroupKey) || 0) + 1);
-    const qualitySummary = {
-      publicEligible: [...qualityById.values()].filter((quality) => quality.publicEligible).length,
-      hiddenAnomalies: [...qualityById.values()].filter((quality) => quality.priceStatus !== "NORMAL").length,
-      nonServiceRecords: [...qualityById.values()].filter((quality) => quality.reasonCodes.includes("NON_SERVICE_RECORD")).length,
-      unmappedCategories: [...qualityById.values()].filter((quality) => quality.reasonCodes.includes("UNMAPPED_CATEGORY")).length,
-      complianceHidden: [...qualityById.values()].filter((quality) => quality.complianceStatus !== "APPROVED").length,
-      malformedNames: [...qualityById.values()].filter((quality) => quality.reasonCodes.includes("MALFORMED_NAME") || quality.reasonCodes.includes("INVALID_SERVICE_NAME") || quality.reasonCodes.includes("INSTRUCTION_ROW")).length,
-      providerLabelsRemoved: rows.filter((item) => /\b(?:followspanel|follows\s*panel|nitro\s*(?:ng)?|smm\s*world)\b/i.test(item.name)).length,
-      duplicateGroups: [...duplicateCounts.values()].filter((count) => count > 1).length,
-    };
     const fingerprints = normalized.map(({ id, fingerprint }) => ({ id, fingerprint })), catalogueHash = providerCatalogueHash(fingerprints);
     if (lock.state.catalogueHash === catalogueHash && lock.state.fingerprintVersion === FINGERPRINT_VERSION && lock.state.qualityRulesetVersion === QUALITY_RULESET_VERSION && lock.state.publicCatalogSnapshotVersion === PUBLIC_CATALOG_SNAPSHOT_VERSION) {
+      const qualitySummary = lock.state.qualitySummary && typeof lock.state.qualitySummary === "object"
+        ? lock.state.qualitySummary
+        : null;
       const result = { provider: provider.key, providerCurrency, providerBalance: balance.balance, providerFunded, serviceCount: rows.length, publicServiceCount: Number(lock.state.publicServiceCount || 0), qualitySummary, publicCatalogueChanged: false, detailChangedIds: [] as string[], changedCount: 0, repricedCount: 0, unchangedCount: rows.length, shortCircuited: true, durationMs: Date.now() - startedAt };
       const metrics = { providerRowsReturned: rows.length, firestoreReads: 2, firestoreRecordsCompared: 0, newRecords: 0, changedRecords: 0, removedRecords: 0, unchangedRecords: rows.length, firestoreWrites: 4, publicSnapshotChanged: false, fallbackActivated: false, shortCircuited: true };
       await finishSync(lock.ref, lock.token, { ...result, status: "completed", lastMetrics: metrics, lastHeartbeatAt: FieldValue.serverTimestamp() });
       await recordSyncRun(provider.key, startedAt, metrics);
       return result;
     }
+
+    // Quality evaluation performs the most CPU-intensive catalogue parsing and
+    // sanitization. The provider fingerprint already covers every input that
+    // affects quality, pricing and public visibility, so an unchanged catalogue
+    // can safely reuse its persisted summary above. Changed catalogues are
+    // evaluated once here, in a single pass instead of repeatedly filtering the
+    // full provider response.
+    const qualityById = new Map<string, ReturnType<typeof evaluateServiceQuality>>();
+    const duplicateCounts = new Map<string, number>();
+    const qualitySummary = {
+      publicEligible: 0,
+      hiddenAnomalies: 0,
+      nonServiceRecords: 0,
+      unmappedCategories: 0,
+      complianceHidden: 0,
+      malformedNames: 0,
+      providerLabelsRemoved: 0,
+      duplicateGroups: 0,
+    };
+    for (const row of normalized) {
+      const sellingRateMinor = sellingPriceForGrossMarginMinor(row.providerRateNgnMinor, grossMarginTargetBps);
+      const quality = evaluateServiceQuality({ name: row.item.name, category: row.item.category, description: "description" in row.item ? row.item.description || "" : "", min: row.item.min, max: row.item.max, rateMinor: row.providerRateNgnMinor, sellingRateMinor, providerFunded, type: row.item.type, refill: row.item.refill, cancel: row.item.cancel });
+      qualityById.set(row.id, quality);
+      duplicateCounts.set(quality.duplicateGroupKey, (duplicateCounts.get(quality.duplicateGroupKey) || 0) + 1);
+      if (quality.publicEligible) qualitySummary.publicEligible += 1;
+      if (quality.priceStatus !== "NORMAL") qualitySummary.hiddenAnomalies += 1;
+      if (quality.reasonCodes.includes("NON_SERVICE_RECORD")) qualitySummary.nonServiceRecords += 1;
+      if (quality.reasonCodes.includes("UNMAPPED_CATEGORY")) qualitySummary.unmappedCategories += 1;
+      if (quality.complianceStatus !== "APPROVED") qualitySummary.complianceHidden += 1;
+      if (quality.reasonCodes.includes("MALFORMED_NAME") || quality.reasonCodes.includes("INVALID_SERVICE_NAME") || quality.reasonCodes.includes("INSTRUCTION_ROW")) qualitySummary.malformedNames += 1;
+      if (/\b(?:followspanel|follows\s*panel|nitro\s*(?:ng)?|smm\s*world)\b/i.test(row.item.name)) qualitySummary.providerLabelsRemoved += 1;
+    }
+    qualitySummary.duplicateGroups = [...duplicateCounts.values()].filter((count) => count > 1).length;
 
     const qualityMigration = lock.state.qualityRulesetVersion !== QUALITY_RULESET_VERSION;
     const publicSnapshotMigration = lock.state.publicCatalogSnapshotVersion !== PUBLIC_CATALOG_SNAPSHOT_VERSION;
