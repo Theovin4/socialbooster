@@ -13,12 +13,21 @@ export function verifyFlutterwaveLegacyHash(hash: string | null, secret = proces
   const received = Buffer.from(hash);
   return expected.length === received.length && timingSafeEqual(expected, received);
 }
+export function verifyFlutterwaveWebhookAuthentication(rawBody: string, headers: Pick<Headers, "get">, secret = process.env.FLUTTERWAVE_WEBHOOK_SECRET_HASH || "") {
+  const signature = headers.get("flutterwave-signature"), legacyHash = headers.get("verif-hash");
+  if (!signature && !legacyHash) return false;
+  if (signature && !verifyFlutterwaveSignature(rawBody, signature, secret)) return false;
+  if (legacyHash && !verifyFlutterwaveLegacyHash(legacyHash, secret)) return false;
+  return true;
+}
 export async function verifyFlutterwaveTransaction(id: number) {
   const key = process.env.FLUTTERWAVE_SECRET_KEY;
   if (!key) throw new Error("Flutterwave is not configured");
   const response = await fetch(`https://api.flutterwave.com/v3/transactions/${id}/verify`, { headers: { Authorization: `Bearer ${key}` }, cache: "no-store" });
   if (!response.ok) throw new Error(`Flutterwave verification failed: ${response.status}`);
-  return verifiedSchema.parse(await response.json()).data;
+  const verified = verifiedSchema.parse(await response.json()).data;
+  if (verified.id !== id) throw new Error("Flutterwave transaction ID mismatch");
+  return verified;
 }
 export async function verifyFlutterwaveTransactionByReference(reference: string) {
   const key = process.env.FLUTTERWAVE_SECRET_KEY;
@@ -27,5 +36,7 @@ export async function verifyFlutterwaveTransactionByReference(reference: string)
   url.searchParams.set("tx_ref", reference);
   const response = await fetch(url, { headers: { Authorization: `Bearer ${key}` }, cache: "no-store" });
   if (!response.ok) throw new Error(`Flutterwave reference verification failed: ${response.status}`);
-  return verifiedSchema.parse(await response.json()).data;
+  const verified = verifiedSchema.parse(await response.json()).data;
+  if (verified.tx_ref !== reference) throw new Error("Flutterwave transaction reference mismatch");
+  return verified;
 }

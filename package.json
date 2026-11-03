@@ -12,11 +12,12 @@
     "lint": "eslint",
     "typecheck": "tsc --noEmit",
     "test": "vitest run --pool=threads --poolOptions.threads.singleThread",
-    "admin:set": "node scripts/set-admin.mjs"
+    "admin:set": "node scripts/set-admin.mjs",
+    "audit:flutterwave:readonly": "node scripts/reconcile-flutterwave-readonly.mjs"
   },
   "dependencies": {
+    "@e965/xlsx": "0.20.3",
     "@next/third-parties": "^16.4.0",
-    "exceljs": "^4.4.0",
     "firebase": "^12.19.0",
     "firebase-admin": "^14.5.0",
     "lucide-react": "^1.55.0",

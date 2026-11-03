@@ -11,6 +11,8 @@ service cloud.firestore {
     match /walletLedger/{id} { allow read: if signedIn() && (resource.data.walletUserId == request.auth.uid || admin()); allow write: if false; }
     match /paymentIntents/{id} { allow read: if signedIn() && (resource.data.userId == request.auth.uid || admin()); allow write: if false; }
     match /paymentEvents/{id} { allow read: if admin(); allow write: if false; }
+    match /gatewayDeliveryReceipts/{id} { allow read: if admin(); allow write: if false; }
+    match /gatewayEventReceipts/{id} { allow read: if admin(); allow write: if false; }
     match /fraudAlerts/{id} { allow read: if admin(); allow write: if false; }
     // Order records contain provider routing and upstream identifiers. Customer
     // views are served through authenticated server routes that return a safe DTO.

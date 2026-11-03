@@ -10,12 +10,12 @@ export async function GET(request: Request) {
   try {
     const verified = await verifyFlutterwaveTransaction(id);
     if (verified.status !== "successful" || verified.tx_ref !== reference) throw new Error("Unverified payment");
-    await creditVerifiedPayment({ provider: "flutterwave", reference, providerTransactionId: String(id), amountMinor: Number(decimalToMinor(String(verified.amount))), currency: verified.currency });
-    return NextResponse.redirect(`${app}/dashboard/wallet?payment=success`);
+    await creditVerifiedPayment({ provider: "flutterwave", reference, providerTransactionId: String(verified.id), amountMinor: Number(decimalToMinor(String(verified.amount))), currency: verified.currency, source: "browser_callback" });
+    return NextResponse.redirect(`${app}/dashboard/wallet?payment=success&reference=${encodeURIComponent(reference)}`);
   } catch (error) {
     const message = error instanceof Error ? error.message : "Unknown callback error";
     console.error("[flutterwave:callback] credit failed", { reference, transactionId: id, error: message });
     await adminDb().collection("paymentEvents").doc(`flutterwave-callback:${id}`).set({ provider: "flutterwave", reference, providerTransactionId: String(id), status: "credit_failed", error: message.slice(0, 300), receivedAt: new Date() }, { merge: true }).catch(() => undefined);
-    return NextResponse.redirect(`${app}/dashboard/wallet?payment=pending`);
+    return NextResponse.redirect(`${app}/dashboard/wallet?payment=pending&reference=${encodeURIComponent(reference)}`);
   }
 }

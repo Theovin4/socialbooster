@@ -16,7 +16,7 @@ export async function POST(request: Request) {
   if (!intent.exists) return Response.json({ error: "Unknown payment reference" }, { status: 400 });
   const expected = intent.data()!, amountMinor = Number(decimalToMinor(event.resource.amount.value));
   if (expected.provider !== "paypal" || amountMinor !== expected.amountMinor || event.resource.amount.currency_code !== expected.currency) return Response.json({ error: "Payment details do not match" }, { status: 400 });
-  await creditVerifiedPayment({ provider: "paypal", reference, providerTransactionId: event.resource.id, amountMinor, currency: event.resource.amount.currency_code });
+  await creditVerifiedPayment({ provider: "paypal", reference, providerTransactionId: event.resource.id, amountMinor, currency: event.resource.amount.currency_code, source: "paypal_webhook" });
   await db.collection("paymentEvents").doc(`paypal:${event.id}`).set({provider:"paypal",eventType:event.event_type,reference,providerTransactionId:event.resource.id,status:"processed",receivedAt:new Date()},{merge:true});
   return Response.json({ received: true });
 }
