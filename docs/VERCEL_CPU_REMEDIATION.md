@@ -43,7 +43,7 @@ Payment verification, wallet finalization, refunds, provider order submission an
 - `/services` receives a Vercel-only five-minute CDN cache with one-hour stale-while-revalidate. Query variants remain separate; no private route receives this header.
 - `/api/public/services` increased its public CDN TTL from one to five minutes and rejects extra/repeated parameters, searches over 80 characters and searches over eight terms before any catalogue work.
 - Provider detail updates invalidate both the detail JSON cache and the matching public service-page cache; catalogue changes invalidate all cached service pages.
-- Service, page, guide, platform and Africa sitemap handlers plus `llms.txt` are now static; the catalogue sitemap revalidates hourly.
+- Page, guide, platform and Africa sitemap handlers plus `llms.txt` are static. The service sitemap is generated at runtime from the public catalogue snapshot, cached for one hour, and invalidated with catalogue changes; this prevents a build without production catalogue access from publishing a permanently empty sitemap.
 - Unchanged provider catalogues short-circuit before quality evaluation. Changed catalogues build quality counts in one pass rather than repeated full-array filters.
 - Provider catalogue processing fails closed above 20,000 validated rows.
 - The catalogue cron ceiling is 300 seconds; every provider request, retry count and batch remains independently bounded.
@@ -55,7 +55,7 @@ No payment, wallet, refund, order-submission, pricing formula, authentication, w
 
 - A synthetic 7,177-service lookup benchmark completed the prior repeated linear scans in 1,664.91 ms versus 1.97 ms for direct lookups across the same set: **99.88% less lookup-loop CPU**. Firestore/network wait is excluded from Vercel Active CPU and is not represented in that benchmark.
 - A 500-iteration synthetic summary benchmark reduced repeated catalogue-summary loop time from 1,283.63 ms to 1,146.63 ms: **10.7% less loop CPU** for changed catalogues. Unchanged catalogues now skip quality evaluation entirely, so their expected reduction is materially larger.
-- Warm service-detail, pricing, sitemap and repeated `/services` requests should avoid function execution through ISR/CDN hits.
+- Warm service-detail, pricing, sitemap and repeated `/services` requests should avoid function execution through ISR/CDN hits. The service sitemap's one-hour data cache uses the bounded public catalogue snapshot rather than scanning the services collection.
 - The overall **80% target is plausible only if public catalogue rendering and crawler traffic caused most of the reported usage**. That is a high-confidence hypothesis, not a measured guarantee, because historical function metrics are unavailable.
 
 ## E. Firebase impact
@@ -73,7 +73,7 @@ Validation on 3 November 2026:
 - Focused catalogue/cache/timing tests: 3 files / 22 tests passed.
 - Full regression: 47 files / 278 tests passed, including Firebase Rules 3/3.
 - TypeScript and ESLint passed.
-- Production build passed with the repository's local production-Firestore guard explicitly enabled. No production Firestore read or write was made. Because the service sitemap catches the blocked data access, the local build's sitemap contains no production catalogue entries; production sitemap content was not validated.
+- The original production build passed with the local production-Firestore guard enabled and made no production Firestore read or write. The service sitemap was then statically generated without the production catalogue and its error fallback emitted an empty sitemap. The follow-up repair makes this data-dependent route runtime-only, removes the success-shaped empty fallback, and uses the tagged one-hour catalogue cache plus bounded CDN caching. Build-time production Firestore access remains unnecessary.
 - `npm audit --omit=dev` reports six moderate upstream Google/Firestore dependency findings, zero high and zero critical; no dependency change was made during this CPU review.
 - `git diff --check` passed. No dedicated Social Booster secret-scan script was found; no credential values were read or added.
 

@@ -151,6 +151,12 @@ const getCachedServiceCatalogPage = unstable_cache(
   { tags: [SERVICE_CATALOG_TAG] },
 );
 
+const getCachedSeoEligibleServiceCatalog = unstable_cache(
+  async () => (await getActiveServiceCatalog()).filter((service) => service.seoEligible),
+  ["seo-eligible-service-catalog-v1"],
+  { tags: [SERVICE_CATALOG_TAG], revalidate: 3_600 },
+);
+
 /**
  * Search, category filtering and pagination are resolved on the server. Each
  * small result page is cached independently, so repeated customer requests do
@@ -169,7 +175,7 @@ export async function getServiceCatalogPage(input: ServiceCatalogPageInput = {})
 }
 
 export async function getSeoEligibleServiceCatalog() {
-  return (await getActiveServiceCatalog()).filter((service) => service.seoEligible);
+  return getCachedSeoEligibleServiceCatalog();
 }
 
 /**

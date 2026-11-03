@@ -79,14 +79,14 @@ describe("Firebase optimization architecture", () => {
     expect(api).toContain('unsupportedParameters');
   });
 
-  it("prerenders public metadata and service-detail endpoints instead of invoking functions per request", () => {
+  it("prerenders public metadata and service-detail endpoints without prerendering data-dependent sitemaps", () => {
     const detailsEndpoint = readFileSync(new URL("../app/api/public/services/[id]/details/route.ts", import.meta.url), "utf8");
     const serviceSitemap = readFileSync(new URL("../app/sitemap-services.xml/route.ts", import.meta.url), "utf8");
     const staticSitemap = readFileSync(new URL("../app/sitemap-pages.xml/route.ts", import.meta.url), "utf8");
     expect(detailsEndpoint).toContain('dynamic = "force-static"');
     expect(detailsEndpoint).toContain("revalidate = 300");
-    expect(serviceSitemap).toContain('dynamic = "force-static"');
-    expect(serviceSitemap).toContain("revalidate = 3_600");
+    expect(serviceSitemap).toContain('dynamic = "force-dynamic"');
+    expect(serviceSitemap).not.toContain('dynamic = "force-static"');
     expect(staticSitemap).toContain('dynamic = "force-static"');
   });
 

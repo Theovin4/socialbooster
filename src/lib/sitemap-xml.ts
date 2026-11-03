@@ -2,7 +2,7 @@ export const publicSiteUrl = "https://www.socialbooster.net.ng";
 
 type SitemapEntry = { url: string; lastModified?: string };
 
-function escapeXml(value: string) {
+export function escapeXml(value: string) {
   return value.replaceAll("&", "&amp;").replaceAll("<", "&lt;").replaceAll(">", "&gt;").replaceAll('"', "&quot;").replaceAll("'", "&apos;");
 }
 
@@ -16,6 +16,6 @@ export function urlSet(entries: SitemapEntry[]) {
   return `<?xml version="1.0" encoding="UTF-8"?><urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">${urls}</urlset>`;
 }
 
-export function xmlResponse(body: string) {
-  return new Response(body, { headers: { "content-type": "application/xml; charset=utf-8", "cache-control": "public, s-maxage=3600, stale-while-revalidate=86400" } });
+export function xmlResponse(body: string, staleWhileRevalidateSeconds = 86_400) {
+  return new Response(body, { headers: { "content-type": "application/xml; charset=utf-8", "cache-control": `public, s-maxage=3600, stale-while-revalidate=${staleWhileRevalidateSeconds}` } });
 }
